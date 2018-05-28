@@ -177,8 +177,8 @@ module Helpers =
 
     let getFsTypeFullName (typ: FSharpType) =
         match tryDefinition typ with
-        | Some tdef -> defaultArg tdef.TryFullName "unknown"
-        | None -> "unknown"
+        | Some tdef -> defaultArg tdef.TryFullName Naming.unkown
+        | None -> Naming.unkown
 
     let isInline (memb: FSharpMemberOrFunctionOrValue) =
         match memb.InlineAnnotation with

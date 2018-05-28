@@ -41,6 +41,16 @@ type IBabelCompiler =
     abstract TransformFunction: Context * string option * Fable.Ident list * Fable.Expr
         -> (Pattern list) * U2<BlockStatement, Expression>
 
+/// This needs to match TypeInfoKind in fable-core/Reflection.ts
+type TypeInfoKind =
+  | Option = 1
+  | Tuple = 2
+  | Array = 3
+  | List = 4
+  | Record = 5
+  | Union = 6
+  | Class = 7
+
 module Util =
     let inline (|ExprType|) (fexpr: Fable.Expr) = fexpr.Type
     let inline (|TransformExpr|) (com: IBabelCompiler) ctx e = com.TransformAsExpr(ctx, e)
@@ -171,7 +181,7 @@ module Util =
     let coreUtil (com: IBabelCompiler) ctx methodName args =
         CallExpression(com.TransformImport(ctx, methodName, "Util", Fable.CoreLib), args) :> Expression
 
-    let buildArray (com: IBabelCompiler) ctx typ (arrayKind: Fable.NewArrayKind) =
+    let makeTypedArray (com: IBabelCompiler) ctx typ (arrayKind: Fable.NewArrayKind) =
         match typ with
         | Fable.Number kind when com.Options.typedArrays ->
             let cons = getTypedArrayName com kind |> Identifier
@@ -190,7 +200,7 @@ module Util =
             | Fable.ArrayAlloc(TransformExpr com ctx size) ->
                 upcast NewExpression(Identifier "Array", [size])
 
-    let buildStringArray strings =
+    let makeStringArray strings =
         strings
         |> List.map (fun x -> StringLiteral x :> Expression)
         |> ArrayExpression :> Expression
@@ -311,13 +321,67 @@ module Util =
             match expr with
             | Replacements.ListLiteral(exprs, _) ->
                 // Use type Any to prevent creation of a typed array
-                buildArray com ctx Fable.Any (Fable.ArrayValues exprs)
+                makeTypedArray com ctx Fable.Any (Fable.ArrayValues exprs)
             | _ -> com.TransformAsExpr(ctx, expr)
         | Fable.AsPojo caseRule -> com.TransformAsExpr(ctx, Replacements.makePojo caseRule expr)
         | Fable.AsUnit -> com.TransformAsExpr(ctx, expr)
 
+    let rec transformTypeInfo (com: IBabelCompiler) r t: Expression =
+        let error msg = addErrorAndReturnNull com r msg
+        let primitive str = StringLiteral str :> Expression
+        let resolveType argMap t =
+            FSharp2Fable.TypeHelpers.makeType com argMap t
+            |> transformTypeInfo com r
+        let mkObj (kind: TypeInfoKind) pairs =
+            pairs |> List.map (fun (name, value) ->
+                let prop, computed = memberFromName name
+                ObjectProperty(prop, value, computed=computed) |> U3.Case1)
+            |> List.append [ObjectProperty(StringLiteral "kind", NumericLiteral (float kind)) |> U3.Case1]
+            |> ObjectExpression :> Expression
+        match t with
+        | Fable.MetaType -> error "You're going too meta, don't you think?"
+        | Fable.GenericParam _ -> error "Cannot get type info of generic parameter, please inline or inject a type resolver"
+        | Fable.Regex -> error "TODO: Type info for regular expressions"
+        | Fable.ErasedUnion _ -> error "TODO: Type info for ErasedUnion"
+        | Fable.Any -> primitive "any"
+        | Fable.Unit -> primitive "unit"
+        | Fable.Boolean -> primitive "boolean"
+        | Fable.Char | Fable.String | Fable.EnumType(Fable.StringEnumType, _) -> primitive "string"
+        | Fable.Number _ | Fable.EnumType(Fable.NumberEnumType, _) -> primitive "number"
+        | Fable.FunctionType _ -> primitive "function"
+        | Fable.Option arg -> mkObj TypeInfoKind.Option ["arg", transformTypeInfo com r arg]
+        | Fable.Array arg -> mkObj TypeInfoKind.Array ["arg", transformTypeInfo com r arg]
+        | Fable.List arg -> mkObj TypeInfoKind.List ["arg", transformTypeInfo com r arg]
+        | Fable.Tuple args ->
+            let args = args |> List.map (transformTypeInfo com r)
+            mkObj TypeInfoKind.Tuple ["args", ArrayExpression args]
+        | Fable.DeclaredType(ent, args) ->
+            let argNames = ent.GenericParameters |> Seq.map (fun x -> x.Name)
+            let argMap = Seq.zip argNames args |> Map
+            // let args = args |> List.map (transformTypeInfo com r)
+            let fullname = defaultArg ent.TryFullName Naming.unknown |> StringLiteral :> Expression
+            if ent.IsFSharpRecord then
+                let fields =
+                    ent.FSharpFields
+                    |> Seq.map (fun x -> ArrayExpression [StringLiteral x.Name; resolveType argMap x.FieldType] :> Expression)
+                    |> Seq.toList
+                mkObj TypeInfoKind.Record ["fullName", fullname; "fields", upcast ArrayExpression fields]
+            elif ent.IsFSharpUnion then
+                let cases =
+                    ent.UnionCases
+                    |> Seq.map (fun x ->
+                        ArrayExpression [
+                            yield upcast StringLiteral x.Name
+                            yield! x.UnionCaseFields |> Seq.map (fun x -> resolveType argMap x.FieldType)
+                        ] :> Expression)
+                    |> Seq.toList
+                mkObj TypeInfoKind.Union ["fullName", fullname; "cases", upcast ArrayExpression cases]
+            else
+                mkObj TypeInfoKind.Class ["fullName", fullname]
+
     let transformValue (com: IBabelCompiler) (ctx: Context) value: Expression =
         match value with
+        | Fable.TypeInfo(t, r) -> transformTypeInfo com r t
         | Fable.This _ | Fable.Super _  -> upcast ThisExpression ()
         | Fable.Null _ -> upcast NullLiteral ()
         | Fable.UnitConstant -> upcast NullLiteral () // TODO: Use `void 0`?
@@ -330,8 +394,8 @@ module Util =
             then upcast UnaryExpression(UnaryMinus, NumericLiteral(x * -1.))
             else upcast NumericLiteral x
         | Fable.RegexConstant (source, flags) -> upcast RegExpLiteral (source, flags)
-        | Fable.NewArray (arrayKind, typ) -> buildArray com ctx typ arrayKind
-        | Fable.NewTuple vals -> buildArray com ctx Fable.Any (Fable.ArrayValues vals)
+        | Fable.NewArray (arrayKind, typ) -> makeTypedArray com ctx typ arrayKind
+        | Fable.NewTuple vals -> makeTypedArray com ctx Fable.Any (Fable.ArrayValues vals)
         // TODO: Compile as List.ofArray if it's a list literal with many values?
         | Fable.NewList (headAndTail, _) ->
             match headAndTail with
@@ -373,7 +437,7 @@ module Util =
                     match FSharp2Fable.Helpers.tryFindAtt Atts.erase uci.Attributes with
                     | Some _ -> vals
                     | None -> (Fable.Value(Fable.StringConstant name))::vals
-                Fable.ArrayValues vals |> buildArray com ctx Fable.Any
+                Fable.ArrayValues vals |> makeTypedArray com ctx Fable.Any
             // Unions without any case with fields are compiled as strings
             else upcast StringLiteral name
         | Fable.NewErasedUnion(e,_) -> com.TransformAsExpr(ctx, e)
@@ -631,6 +695,7 @@ module Util =
         let jsInstanceof (TransformExpr com ctx cons) (TransformExpr com ctx expr): Expression =
             upcast BinaryExpression(BinaryInstanceOf, expr, cons, ?loc=range)
         match typ with
+        | Fable.MetaType -> upcast BooleanLiteral false // TODO: Actually check if it's type info?
         | Fable.Any -> upcast BooleanLiteral true
         | Fable.Unit -> upcast BinaryExpression(BinaryEqual, com.TransformAsExpr(ctx, expr), NullLiteral(), ?loc=range)
         | Fable.Boolean -> jsTypeof "boolean" expr
