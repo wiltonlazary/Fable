@@ -829,7 +829,8 @@ module Util =
             | Some (Types.int64 | Types.uint64) ->
                 jsInstanceof (makeCoreRef Fable.Any "default" "Long") expr
             | Some Types.bigint ->
-                jsInstanceof (makeCoreRef Fable.Any "default" "BigInt") expr
+                let name = Naming.sanitizeIdentForbiddenChars "System.Numerics.BigInteger"
+                jsInstanceof (makeCoreRef Fable.Any name "Math/z") expr
             | _ ->
                 if ent.IsFSharpExceptionDeclaration then
                     let expr = com.TransformAsExpr(ctx, expr)

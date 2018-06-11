@@ -11,11 +11,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- <Compile Include="BigInt/n.fsi"/> -->
-    <!-- <Compile Include="BigInt/n.fs"/> -->
-    <!-- <Compile Include="BigInt/z.fsi"/> -->
-    <!-- <Compile Include="BigInt/z.fs"/> -->
-    <!-- <Compile Include="BigInt.fs" /> -->
+    <Compile Include="Math/n.fsi"/>
+    <Compile Include="Math/n.fs"/>
+    <Compile Include="Math/z.fsi"/>
+    <Compile Include="Math/z.fs"/>
+    <Compile Include="BigInt.fs" />
     <Compile Include="Array.fs" />
     <Compile Include="List.fs" />
     <Compile Include="Set.fs" />
