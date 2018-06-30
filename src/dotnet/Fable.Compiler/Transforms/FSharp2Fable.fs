@@ -831,6 +831,23 @@ let private getRootModuleAndDecls decls =
         | decls -> outerEnt, decls
     getRootModuleAndDeclsInner None decls
 
+let private tryFindEntity (implFiles: Map<string, FSharpImplementationFileContents>)
+                          fileName (ent: FSharpEntity) =
+    let rec tryFindEntity' (entFullName: string) = function
+        | FSharpImplementationFileDeclaration.Entity (e, decls) ->
+            let entFullName2 = getEntityFullName e
+            if entFullName2 = entFullName
+            then Some e
+            elif entFullName2.StartsWith(entFullName)
+            then List.tryPick (tryFindEntity' entFullName) decls
+            else None
+        | FSharpImplementationFileDeclaration.MemberOrFunctionOrValue _
+        | FSharpImplementationFileDeclaration.InitAction _ -> None
+    Map.tryFind (Path.normalizeFullPath fileName) implFiles
+    |> Option.bind (fun f ->
+        let entFullName = getEntityFullName ent
+        f.Declarations |> List.tryPick (tryFindEntity' entFullName))
+
 let private tryGetMemberArgsAndBody (implFiles: Map<string, FSharpImplementationFileContents>)
                                     fileName (meth: FSharpMemberOrFunctionOrValue) =
     let rec tryGetMemberArgsAndBody' (methFullName: string) = function
@@ -852,8 +869,8 @@ type FableCompiler(com: ICompiler, implFiles: Map<string, FSharpImplementationFi
     member val UsedVarNames = HashSet<string>()
     member val Dependencies = HashSet<string>()
     member val InterfaceImplementations: Dictionary<_,_> = Dictionary()
-    member __.AddInlineExpr(memb, inlineExpr) =
-        let fullName = getMemberUniqueName com memb
+    member this.AddInlineExpr(memb, inlineExpr) =
+        let fullName = getMemberUniqueName this memb
         com.GetOrAddInlineExpr(fullName, fun () -> inlineExpr) |> ignore
     member this.AddInterfaceImplementation(memb: FSharpMemberOrFunctionOrValue, objMemb: Fable.ObjectMember) =
         match memb.DeclaringEntity, tryGetInterfaceDefinitionFromMethod memb with
@@ -892,13 +909,21 @@ type FableCompiler(com: ICompiler, implFiles: Map<string, FSharpImplementationFi
             Replacements.tryCall this ctx r t info thisArg args
         member __.TryReplaceInterfaceCast(r, t, name, e) =
             Replacements.tryInterfaceCast r t name e
+        member __.FindEntityImplementation(fileName, entity) =
+            match tryFindEntity implFiles fileName entity with
+            | Some e -> e
+            | None ->
+                getEntityFullName entity
+                |> sprintf "Cannot find implementation location for %s"
+                |> addError com None
+                entity
         member this.InjectArgument(enclosingEntity, r, genArgs, parameter) =
             Inject.injectArg this enclosingEntity r genArgs parameter
         member this.GetInlineExpr(memb) =
             let fileName = (getMemberLocation memb).FileName |> Path.normalizePath
             if fileName <> com.CurrentFile then
                 this.Dependencies.Add(fileName) |> ignore
-            let fullName = getMemberUniqueName com memb
+            let fullName = getMemberUniqueName this memb
             com.GetOrAddInlineExpr(fullName, fun () ->
                 match tryGetMemberArgsAndBody implFiles fileName memb with
                 | Some(args, body) -> List.concat args, body

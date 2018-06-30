@@ -39,6 +39,7 @@ type IFableCompiler =
         info: Fable.ReplaceCallInfo * thisArg: Fable.Expr option * args: Fable.Expr list -> Fable.Expr option
     abstract TryReplaceInterfaceCast: SourceLocation option * Fable.Type *
         interfaceName: string * Fable.Expr -> Fable.Expr option
+    abstract FindEntityImplementation: locationPath: string * FSharpEntity -> FSharpEntity
     abstract InjectArgument: enclosingEntity: FSharpEntity option * SourceLocation option *
         genArgs: ((string * Fable.Type) list) * FSharpParameter -> Fable.Expr
     abstract GetInlineExpr: FSharpMemberOrFunctionOrValue -> InlineExpr
@@ -103,7 +104,7 @@ module Helpers =
         then typ.TypeDefinition.TryFullName = Some Types.unit
         else false
 
-    let findOverloadIndex (entity: FSharpEntity) (m: FSharpMemberOrFunctionOrValue) =
+    let findOverloadIndex (com: IFableCompiler) (entity: FSharpEntity) (m: FSharpMemberOrFunctionOrValue) =
         let argsEqual (args1: FSharpParameter[]) (args2: FSharpParameter[]) =
             if args1.Length = args2.Length
             // Checking equality of FSharpParameter seems to be fast
@@ -115,6 +116,12 @@ module Helpers =
             // (?) Sometimes .CurriedParameterGroups contains the unit arg and sometimes doesn't
             | [|arg|] when isUnit arg.Type -> [||]
             | args -> args
+        let entity =
+            let fileName = entity.DeclarationLocation.FileName
+            if fileName.EndsWith(".fsi") then
+                let fileName = fileName.Substring(0, fileName.Length - 1) // Remove last `i`
+                com.FindEntityImplementation(fileName, entity)
+            else entity
         if m.IsImplicitConstructor || m.IsOverrideOrExplicitInterfaceImplementation
         then 0
         else
@@ -140,7 +147,7 @@ module Helpers =
         let memberPart = Naming.StaticMemberPart(interfaceEntityFullName, None)
         Naming.sanitizeIdent (fun _ -> false) entityName memberPart
 
-    let private getMemberMangledName (com: ICompiler) trimRootModule (memb: FSharpMemberOrFunctionOrValue) =
+    let private getMemberMangledName (com: IFableCompiler) trimRootModule (memb: FSharpMemberOrFunctionOrValue) =
         match memb.DeclaringEntity with
         | Some ent when ent.IsFSharpModule ->
             match getEntityMangledName com trimRootModule ent with
@@ -148,7 +155,7 @@ module Helpers =
             | moduleName -> moduleName, Naming.StaticMemberPart(memb.CompiledName, None)
         | Some ent ->
             let overloadIndex =
-                match findOverloadIndex ent memb with
+                match findOverloadIndex com ent memb with
                 | 0 -> None
                 | i -> Some i
             let entName = getEntityMangledName com trimRootModule ent
@@ -157,12 +164,12 @@ module Helpers =
             else entName, Naming.StaticMemberPart(memb.CompiledName, overloadIndex)
         | None -> memb.CompiledName, Naming.NoMemberPart
 
-    let getMemberDeclarationName (com: ICompiler) (memb: FSharpMemberOrFunctionOrValue) =
+    let getMemberDeclarationName (com: IFableCompiler) (memb: FSharpMemberOrFunctionOrValue) =
         getMemberMangledName com true memb
         ||> Naming.sanitizeIdent (fun _ -> false)
 
     /// Used to identify members uniquely in the inline expressions dictionary
-    let getMemberUniqueName (com: ICompiler) (memb: FSharpMemberOrFunctionOrValue): string =
+    let getMemberUniqueName (com: IFableCompiler) (memb: FSharpMemberOrFunctionOrValue): string =
         getMemberMangledName com false memb
         ||> Naming.buildNameWithoutSanitation
 
