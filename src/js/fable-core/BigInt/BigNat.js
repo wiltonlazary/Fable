@@ -953,7 +953,7 @@ export function toString(n) {
   if (digits.tail == null) {
     return "0";
   } else {
-    return join("", ...Array.from(digits));
+    return join("", digits);
   }
 }
 export function ofString(str) {

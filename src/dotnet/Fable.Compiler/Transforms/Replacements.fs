@@ -1149,7 +1149,6 @@ let implementedStringFunctions =
            "Insert"
            "IsNullOrEmpty"
            "IsNullOrWhiteSpace"
-           "Join"
            "PadLeft"
            "PadRight"
            "Remove"
@@ -1157,6 +1156,19 @@ let implementedStringFunctions =
         |]
 
 let strings (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
+    let makeToStringFunction (com: ICompiler) enumerableType =
+        let genType =
+            match enumerableType with
+            | Array t -> t
+            | List t -> t
+            | DeclaredType(_, [t]) -> t // IEnumerable
+            | _ -> Any
+        if genType = String then
+            []
+        else
+            let x = makeTypedIdent genType "x"
+            let body = toString com None [IdentExpr x]
+            [Function(Delegate [x], body, None)]
     match i.CompiledName, thisArg, args with
     | ".ctor", _, _ ->
         match List.head i.SignatureArgTypes with
@@ -1227,11 +1239,22 @@ let strings (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr opt
             Helper.CoreCall("String", "split", t, c::args, ?loc=r) |> Some
         | args ->
             Helper.CoreCall("String", "split", t, args, i.SignatureArgTypes, ?thisArg=thisArg, ?loc=r) |> Some
-    | "Concat", None, _ ->
-        // TODO: String.Concat can also accept non-string arguments
-        Helper.CoreCall("String", "join", t, (makeStrConst "")::args, ?loc=r) |> Some
     | "CompareOrdinal", None, _ ->
         Helper.CoreCall("String", "compareOrdinal", t, args, ?loc=r) |> Some
+    | "Concat", None, _ ->
+        let arrayType =
+            match args with
+            | array::_ -> array.Type
+            | _ -> Any
+        Helper.CoreCall("String", "concat", t, (makeToStringFunction com arrayType) @ args, ?loc=r) |> Some
+    | "Join", None, [_delimiter; _parts; ExprType(Number _); ExprType(Number _)] ->
+        Helper.CoreCall("String", "joinWithIndices", t, args, ?loc=r) |> Some
+    | "Join", None, _ ->
+        let arrayType =
+            match args with
+            | _::array::_ -> array.Type
+            | _ -> Any
+        Helper.CoreCall("String", "join", t, args @ (makeToStringFunction com arrayType), ?loc=r) |> Some
     | Patterns.SetContains implementedStringFunctions, thisArg, args ->
         let hasSpread = match i.Spread with SeqSpread -> true | _ -> false
         Helper.CoreCall("String", Naming.lowerFirst i.CompiledName, t, args, i.SignatureArgTypes,

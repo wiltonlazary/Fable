@@ -1,6 +1,6 @@
 import { toString as dateToString } from "./Date";
 import { escape } from "./RegExp";
-import { isArray, toString } from "./Util";
+import { isArray, isIterable, toString } from "./Util";
 
 function asString(x: string|number): string {
   return typeof x === "number" ? String.fromCharCode(x) : x;
@@ -293,18 +293,27 @@ export function isNullOrWhiteSpace(str: string | any) {
   return typeof str !== "string" || /^\s*$/.test(str);
 }
 
-export function join(delimiter: string|number, xs: ArrayLike<string>) {
-  let xs2 = typeof xs === "string" ? [xs] : xs as any;
-  const len = arguments.length;
-  if (len > 2) {
-    xs2 = Array(len - 1);
-    for (let key = 1; key < len; key++) {
-      xs2[key - 1] = arguments[key];
-    }
-  } else if (!Array.isArray(xs2)) {
-    xs2 = Array.from(xs2);
+export function join<T>(delimiter: string|number, xs: Iterable<T>, toString?: (x: T) => string) {
+  const xs2 = isArray(xs) ? xs as any[] : Array.from(xs);
+  return typeof toString === "function"
+    ? xs2.map(toString).join(asString(delimiter))
+    : xs2.join(asString(delimiter));
+}
+
+export function joinWithIndices<T>(delimiter: string|number, xs: string[], startIndex: number, count: number) {
+  const endIndexPlusOne = startIndex + count;
+  if (endIndexPlusOne > xs.length) {
+    throw new Error("Index and count must refer to a location within the buffer.");
   }
-  return xs2.map((x: string) => toString(x)).join(asString(delimiter));
+  return join(delimiter, xs.slice(startIndex, endIndexPlusOne));
+}
+
+export function concat<T>(toString: (x: T) => string, ...xs: T[]) {
+  if (xs.length === 1 && isIterable(xs[0])) {
+    return join("", xs[0] as any, toString);
+  } else {
+    return join("", xs, toString);
+  }
 }
 
 /** Validates UUID as specified in RFC4122 (versions 1-5). Trims braces. */
