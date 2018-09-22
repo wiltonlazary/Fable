@@ -1,12 +1,14 @@
+const path = require("path");
+
 module.exports = {
-  entry: "QuickTest.fsproj",
-  outDir: "temp",
+  entry: path.join(__dirname, "QuickTest.fsproj"),
+  outDir: path.join(__dirname, "temp"),
   fable: {
     define: ["DEBUG"]
   },
   babel: {
-    plugins: ["transform-es2015-modules-commonjs"],
-    //   presets: [["env", { modules: "commonjs" }]],
+    plugins: ["@babel/plugin-transform-modules-commonjs"],
+    //   presets: [["@babel/preset-env", { modules: "commonjs" }]],
   },
   // allFiles: true
 };

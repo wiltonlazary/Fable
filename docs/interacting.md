@@ -1,5 +1,7 @@
 # Interacting with JavaScript
 
+> This document applies to Fable 1. It will be updated soon with Fable 2 information.
+
 This page is structured as a reference document. For a more practical approach to Fable and JavaScript interop, please check [this great guide by Zaid Ajaj](https://medium.com/@zaid.naom/f-interop-with-javascript-in-fable-the-complete-guide-ccc5b896a59f).
 
 ## Importing JavaScript code
@@ -243,6 +245,20 @@ let myMethod (arg: U3<string, int, Test>) =
     | U3.Case3 t -> t.Value
 ```
 
+When passing arguments to a method accepting `U2`, `U3`... you can use the `!^` as syntax sugar so you don't need to type the exact case (the argument will still be type checked):
+
+```fsharp
+open Fable.Core.JsInterop
+
+let myMethod (arg: U3<string, int, Test>) = ...
+
+// This is equivalent to: myMethod (U3.Case2 5)
+myMethod !^5
+
+// This doesn't compile, myMethod doesn't accept floats
+myMethod !^2.3
+```
+
 ### StringEnum attribute
 
 Similarly, in TypeScript it's possible to define [String Literal Types](https://www.typescriptlang.org/docs/handbook/advanced-types.html#string-literal-types) which are similar to enumerations with an underlying string value. Fable allows the same feature by using union types and the `StringEnum` attribute. These union types must not have any data fields as they will be compiled to a string matching the name of the union case.
@@ -305,4 +321,4 @@ JsonConvert.SerializeObject(value, [|jsonConverter|])
 JsonConvert.DeserializeObject<MyType>(json, [|jsonConverter|])
 ```
 
-If you need more fine-grained control over the JSON serialization, please use the [Thot library](https://mangelmaxime.github.io/Thot/json/decode.html).
+If you need more fine-grained control over the JSON serialization, please use the [Thoth library](https://mangelmaxime.github.io/Thoth/json/decode.html).

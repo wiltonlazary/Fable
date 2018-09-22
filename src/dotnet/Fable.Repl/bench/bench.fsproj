@@ -7,8 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="../../../../build/fable/Fable.Core.dll" />
-    <ProjectReference Include="../Fable.JS.fsproj" />
+    <PackageReference Include="Fable.Core" Version="2.0.0-beta-001" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Fable.Repl.fsproj" />
   </ItemGroup>
 
   <ItemGroup>

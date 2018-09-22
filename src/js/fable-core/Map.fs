@@ -28,6 +28,7 @@ type MapTree<'Key,'Value when 'Key : comparison > =
     // exactly one cache line. It is currently ~7 and 4 words respectively.
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
 module MapTree =
 
     let rec sizeAux acc m =
@@ -384,7 +385,7 @@ module MapTree =
             then Some(en.Current, en)
             else None)
 
-[<CompiledName("FSharpMap"); Replaces("Microsoft.FSharp.Collections.FSharpSet`1")>]
+[<CompiledName("FSharpMap"); Replaces("Microsoft.FSharp.Collections.FSharpMap`2")>]
 type Map<[<EqualityConditionalOn>]'Key,[<EqualityConditionalOn;ComparisonConditionalOn>]'Value when 'Key : comparison >(comparer: IComparer<'Key>, tree: MapTree<'Key,'Value>) =
     member internal __.Comparer = comparer
     member internal __.Tree = tree
@@ -395,6 +396,10 @@ type Map<[<EqualityConditionalOn>]'Key,[<EqualityConditionalOn;ComparisonConditi
     member __.Item
         with get(k : 'Key) =
             MapTree.find comparer k tree
+    member __.TryGetValue(k: 'Key, defValue: 'Value) =
+        match MapTree.tryFind comparer k tree with
+        | Some v -> true, v
+        | None -> false, defValue
     member __.TryPick(f) = MapTree.tryPick f tree
     member __.Exists(f) = MapTree.exists f tree
     member __.Filter(f): Map<'Key,'Value> =
@@ -575,14 +580,13 @@ let private createMutablePrivate (comparer: IComparer<'Key>) tree' =
             this
         member __.values () =
             MapTree.toSeq tree |> Seq.map (fun kv -> kv.Value)
-      interface IEnumerable<_> with
+    interface IEnumerable<_> with
         member __.GetEnumerator() =
             MapTree.mkIEnumerator tree
-      interface IEnumerable with
+    interface IEnumerable with
         member __.GetEnumerator() =
             upcast MapTree.mkIEnumerator tree
     }
-
 
 /// Emulate JS Set with custom comparer for non-primitive values
 let createMutable (source: ('Key*'Value) seq) ([<Inject>] comparer: IComparer<'Key>) =

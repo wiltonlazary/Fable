@@ -32,7 +32,7 @@ let visit f e =
     | Test(e, kind, r) -> Test(f e, kind, r)
     | DelayedResolution(kind, t, r) ->
         match kind with
-        | AsSeqFromList e -> DelayedResolution(AsSeqFromList(f e), t, r)
+        | AsInterface(e, cast, name) -> DelayedResolution(AsInterface(f e, cast, name), t, r)
         | AsPojo(e1, e2) -> DelayedResolution(AsPojo(f e1, f e2), t, r)
         | AsUnit e -> DelayedResolution(AsUnit(f e), t, r)
         | Curry(e, arity) -> DelayedResolution(Curry(f e, arity), t, r)
@@ -127,7 +127,7 @@ let getSubExpressions = function
     | Test(e, _, _) -> [e]
     | DelayedResolution(kind, _, _) ->
         match kind with
-        | AsSeqFromList e | AsUnit e | Curry(e,_) -> [e]
+        | AsInterface(e,_,_) | AsUnit e | Curry(e,_) -> [e]
         | AsPojo(e1, e2) -> [e1; e2]
     | Function(_, body, _) -> [body]
     | ObjectExpr(members, _, baseCall) ->
@@ -259,7 +259,7 @@ module private Transforms =
                                                     && (countReferences 1 ident.Name letBody <= 1) ->
                 if Option.isSome currentName then
                     sprintf "Unexpected named function when erasing binding (%s > %s)" currentName.Value ident.Name
-                    |> addWarning com ident.Range
+                    |> addWarning com [] ident.Range
                 let replacement = Function(args, funBody, Some ident.Name)
                 replaceValues (Map [ident.Name, replacement]) letBody
             | value when ident.IsCompilerGenerated
@@ -371,15 +371,15 @@ module private Transforms =
                 | _, [] -> List.rev acc
             mapArgsInner f [] argTypes args
         match argTypes with
-        | Some [] -> args // Do nothing
-        | Some argTypes ->
+        | NoUncurrying | Typed [] -> args // Do nothing
+        | Typed argTypes ->
             (argTypes, args) ||> mapArgs (fun expectedType arg ->
                 let arg = checkSubArguments expectedType arg
                 let arity = getLambdaTypeArity expectedType
                 if arity > 1
                 then uncurryExpr (Some arity) arg
                 else arg)
-        | None -> List.map (uncurryExpr None) args
+        | AutoUncurrying -> List.map (uncurryExpr None) args
 
     let uncurryInnerFunctions (_: ICompiler) e =
         let curryIdentInBody identName (args: Ident list) body =
@@ -393,7 +393,7 @@ module private Transforms =
         | Operation(CurriedApply((NestedLambda(args, fnBody, Some name)), argExprs), t, r)
                         when List.isMultiple args && List.sameLength args argExprs ->
             let fnBody = curryIdentInBody name args fnBody
-            let info = argInfo None argExprs (args |> List.map (fun a -> a.Type) |> Some)
+            let info = argInfo None argExprs (args |> List.map (fun a -> a.Type) |> Typed)
             Function(Delegate args, fnBody, Some name)
             |> staticCall r t info
         | e -> e
@@ -437,7 +437,7 @@ module private Transforms =
                 fields
                 |> Seq.map (fun fi -> FSharp2Fable.TypeHelpers.makeType com Map.empty fi.FieldType)
                 |> Seq.toList
-            uncurryArgs (Some argTypes) args
+            uncurryArgs (Typed argTypes) args
         match e with
         | Operation(Call(kind, info), t, r) ->
             let info = { info with Args = uncurryArgs info.SignatureArgTypes info.Args }
@@ -445,7 +445,7 @@ module private Transforms =
         | Operation(CurriedApply(callee, args), t, r) ->
             match callee.Type with
             | NestedLambdaType(argTypes, _) ->
-                Operation(CurriedApply(callee, uncurryArgs (Some argTypes) args), t, r)
+                Operation(CurriedApply(callee, uncurryArgs (Typed argTypes) args), t, r)
             | _ -> e
         | Operation(Emit(macro, Some info), t, r) ->
             let info = { info with Args = uncurryArgs info.SignatureArgTypes info.Args }
@@ -458,7 +458,7 @@ module private Transforms =
             let args = uncurryConsArgs args uci.UnionCaseFields
             Value(NewUnion(args, uci, ent, genArgs))
         | Set(e, FieldSet(fieldName, fieldType), value, r) ->
-            let value = uncurryArgs (Some [fieldType])  [value]
+            let value = uncurryArgs (Typed [fieldType])  [value]
             Set(e, FieldSet(fieldName, fieldType), List.head value, r)
         | e -> e
 
@@ -466,7 +466,7 @@ module private Transforms =
         let uncurryApply r t applied args uncurriedArity =
             let argsLen = List.length args
             if uncurriedArity = argsLen then
-                let info = argInfo None args None
+                let info = argInfo None args AutoUncurrying
                 staticCall r t info applied |> Some
             else
                 Replacements.partialApplyAtRuntime t (uncurriedArity - argsLen) applied args |> Some
@@ -543,27 +543,25 @@ let rec optimizeDeclaration (com: ICompiler) = function
         ActionDeclaration(optimizeExpr com expr)
     | ValueDeclaration(value, info) ->
         ValueDeclaration(optimizeExpr com value, info)
-    | ConstructorDeclaration kind as consDecl ->
-        match kind with
-        | ClassImplicitConstructor info ->
-            let args, body =
-                // Create a function so the arguments can be uncurried, see #1441
-                Function(Delegate info.Arguments, info.Body, None)
-                |> optimizeExpr com
-                |> function
-                    | Function(Delegate args, body, _) -> args, body
-                    | _ ->
-                        addWarning com None "Unexpected result when optimizing ClassImplicitConstructor, please report"
-                        info.Arguments, info.Body
-            { info with Arguments = args; Body = body }
-            |> ClassImplicitConstructor |> ConstructorDeclaration
-        | _ -> consDecl
-    | OverrideDeclaration(args, body, info) ->
-        OverrideDeclaration(args, optimizeExpr com body, info)
-    | InterfaceCastDeclaration(members, info) ->
-        let members = members |> List.map (fun (ObjectMember(k,v,kind)) ->
-            ObjectMember(optimizeExpr com k, optimizeExpr com v, kind))
-        InterfaceCastDeclaration(members, info)
+    | ConstructorDeclaration kind ->
+        let kind =
+            match kind with
+            | ClassImplicitConstructor info ->
+                let args, body =
+                    // Create a function so the arguments can be uncurried, see #1441
+                    Function(Delegate info.Arguments, info.Body, None)
+                    |> optimizeExpr com
+                    |> function
+                        | Function(Delegate args, body, _) -> args, body
+                        | _ ->
+                            "Unexpected result when optimizing ClassImplicitConstructor, please report"
+                            |> addWarning com [] None
+                            info.Arguments, info.Body
+                ClassImplicitConstructor { info with Arguments = args; Body = body }
+            | kind -> kind
+        ConstructorDeclaration kind
+    | AttachedMemberDeclaration(args, body, info) ->
+        AttachedMemberDeclaration(args, optimizeExpr com body, info)
 
 let optimizeFile (com: ICompiler) (file: File) =
     let newDecls = List.map (optimizeDeclaration com) file.Declarations

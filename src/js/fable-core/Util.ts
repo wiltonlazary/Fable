@@ -1,17 +1,6 @@
 // tslint:disable:ban-types
 import { compare as compareDates, toString as dateToString } from "./Date";
 
-export const THIS_REF = Symbol("this");
-
-// In case the object has been casted to an interface, test also agains THIS_REF
-export function instanceofExtended(obj: any, cons: FunctionConstructor) {
-  return obj instanceof cons || obj[THIS_REF] instanceof cons;
-}
-
-export function downcast(obj: any) {
-  return obj[THIS_REF] != null ? obj[THIS_REF] : obj;
-}
-
 // Object.assign flattens getters and setters
 // See https://stackoverflow.com/questions/37054596/js-es5-how-to-assign-objects-with-setters-and-getters
 export function extend(target: any, ...sources: any[]) {
@@ -141,12 +130,12 @@ export function lazyFromValue<T>(v: T) {
   return new Lazy(() => v);
 }
 
-export function int16ToString(i: number, radix: number) {
+export function int16ToString(i: number, radix?: number) {
   i = i < 0 && radix != null && radix !== 10 ? 0xFFFF + i + 1 : i;
   return i.toString(radix);
 }
 
-export function int32ToString(i: number, radix: number) {
+export function int32ToString(i: number, radix?: number) {
   i = i < 0 && radix != null && radix !== 10 ? 0xFFFFFFFF + i + 1 : i;
   return i.toString(radix);
 }

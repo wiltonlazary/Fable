@@ -1,36 +1,7 @@
 import { toString as dateToString } from "./Date";
 import Long, { fromBytes as longFromBytes, toBytes as longToBytes, toString as longToString } from "./Long";
 import { escape } from "./RegExp";
-import { isArray, toString } from "./Util";
-
-function asString(x: string|number): string {
-  return typeof x === "number" ? String.fromCharCode(x) : x;
-}
-
-export function toCharArray(str: string): Uint16Array {
-  const len = str.length;
-  const ar = new Uint16Array(len);
-  for (let i = 0; i < len; i++) {
-    ar[i] = str.charCodeAt(i);
-  }
-  return ar;
-}
-
-export function toCharIterable(source: any): Iterable<number> {
-  return typeof source === "string" ? toCharArray(source) : source;
-}
-
-export function fromCharArray(ar: Uint16Array|number[], startIndex?: number, count?: number): string {
-  const ar2 = startIndex == null
-    ? ar
-    // If count arg is undefined, startIndex becomes the count and startIndex is 0
-    : (count == null ? ar.slice(0, startIndex) : ar.slice(startIndex, startIndex + count));
-  return String.fromCharCode(...ar2);
-}
-
-export function fromChar(char: number, count: number): string {
-  return String.fromCharCode(char).repeat(count);
-}
+import { toString } from "./Util";
 
 const fsFormatRegExp = /(^|[^%])%([0+ ]*)(-?\d+)?(?:\.(\d+))?(\w)/;
 const formatRegExp = /\{(\d+)(,-?\d+)?(?:\:(.+?))?\}/g;
@@ -46,14 +17,14 @@ const enum StringComparison {
   OrdinalIgnoreCase = 5,
 }
 
-function cmp(x: string, y: string, ic: boolean|StringComparison) {
-  function isIgnoreCase(i: boolean|StringComparison) {
+function cmp(x: string, y: string, ic: boolean | StringComparison) {
+  function isIgnoreCase(i: boolean | StringComparison) {
     return i === true ||
       i === StringComparison.CurrentCultureIgnoreCase ||
       i === StringComparison.InvariantCultureIgnoreCase ||
       i === StringComparison.OrdinalIgnoreCase;
   }
-  function isOrdinal(i: boolean|StringComparison) {
+  function isOrdinal(i: boolean | StringComparison) {
     return i === StringComparison.Ordinal ||
       i === StringComparison.OrdinalIgnoreCase;
   }
@@ -96,7 +67,7 @@ export function startsWith(str: string, pattern: string, ic: number) {
   return false;
 }
 
-export function indexOfAny(str: string, anyOf: number[], ...args: number[]) {
+export function indexOfAny(str: string, anyOf: string[], ...args: number[]) {
   if (str == null || str === "") {
     return -1;
   }
@@ -113,7 +84,7 @@ export function indexOfAny(str: string, anyOf: number[], ...args: number[]) {
   }
   str = str.substr(startIndex, length);
   for (const c of anyOf) {
-    const index = str.indexOf(String.fromCharCode(c));
+    const index = str.indexOf(c);
     if (index > -1) {
       return index + startIndex;
     }
@@ -130,7 +101,7 @@ function toHex(x: any) {
 }
 
 export type IPrintfFormatContinuation =
-(f: (x: string) => any) => ((x: string) => any);
+  (f: (x: string) => any) => ((x: string) => any);
 
 export interface IPrintfFormat {
   input: string;
@@ -183,7 +154,7 @@ function formatOnce(str2: any, rep: any) {
       const plusPrefix = flags.indexOf("+") >= 0 && parseInt(rep, 10) >= 0;
       pad = parseInt(pad, 10);
       if (!isNaN(pad)) {
-        const ch = pad >= 0 && flags.indexOf("0") >= 0 ? 48 : 32; // "0" : " ";
+        const ch = pad >= 0 && flags.indexOf("0") >= 0 ? "0" : " ";
         rep = padLeft(String(rep), Math.abs(pad) - (plusPrefix ? 1 : 0), ch, pad < 0);
       }
       const once = prefix + (plusPrefix ? "+" + rep : rep);
@@ -222,7 +193,7 @@ export function format(str: string, ...args: any[]) {
   return str.replace(formatRegExp,
     (match: any, idx: any, pad: any, pattern: any) => {
       let rep = args[idx];
-      let padSymbol = 32; // " ";
+      let padSymbol = " ";
       if (typeof rep === "number" || rep instanceof Long) {
         switch ((pattern || "").substring(0, 1)) {
           case "f": case "F":
@@ -249,7 +220,7 @@ export function format(str: string, ...args: any[]) {
                 rep = rep.toFixed(decs = m[2].length - 1);
               }
               pad = "," + (m[1].length + (decs ? decs + 1 : 0)).toString();
-              padSymbol = 48; // "0";
+              padSymbol = "0";
             } else if (pattern) {
               rep = pattern;
             }
@@ -296,23 +267,21 @@ export function isNullOrWhiteSpace(str: string | any) {
   return typeof str !== "string" || /^\s*$/.test(str);
 }
 
-export function join(delimiter: string|number, xs: ArrayLike<string>) {
-  let xs2 = typeof xs === "string" ? [xs] : xs as any;
-  const len = arguments.length;
-  if (len > 2) {
-    xs2 = Array(len - 1);
-    for (let key = 1; key < len; key++) {
-      xs2[key - 1] = arguments[key];
-    }
-  } else if (!Array.isArray(xs2)) {
-    xs2 = Array.from(xs2);
+export function join(delimiter: string, ...xs: any[]): string {
+  return xs.map((x) => String(x)).join(delimiter);
+}
+
+export function joinWithIndices<T>(delimiter: string, xs: string[], startIndex: number, count: number) {
+  const endIndexPlusOne = startIndex + count;
+  if (endIndexPlusOne > xs.length) {
+    throw new Error("Index and count must refer to a location within the buffer.");
   }
-  return xs2.map((x: string) => toString(x)).join(asString(delimiter));
+  return join(delimiter, ...xs.slice(startIndex, endIndexPlusOne));
 }
 
 /** Validates UUID as specified in RFC4122 (versions 1-5). Trims braces. */
-export function validateGuid(str: string, doNotThrow?: boolean): string|[boolean, string] {
-  const trimmed = trim(str, 123, 125); // "{","}"
+export function validateGuid(str: string, doNotThrow?: boolean): string | [boolean, string] {
+  const trimmed = trim(str, "{", "}");
   if (guidRegex.test(trimmed)) {
     return doNotThrow ? [true, trimmed] : trimmed;
   } else if (doNotThrow) {
@@ -321,29 +290,26 @@ export function validateGuid(str: string, doNotThrow?: boolean): string|[boolean
   throw new Error("Guid should contain 32 digits with 4 dashes: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx");
 }
 
-/* tslint:disable */
 // From https://gist.github.com/LeverOne/1308368
-export function newGuid(){
-  let b = ''
-  for(
-    let a = 0;
-    a++ < 36;
+export function newGuid() {
+  let b = "";
+  for (let a = 0; a++ < 36;) {
     b += a * 51 & 52
-      ? (a^15 ? 8^Math.random() * (a^20 ? 16 : 4) : 4).toString(16)
-      : '-'
-  );
+      ? (a ^ 15 ? 8 ^ Math.random() * (a ^ 20 ? 16 : 4) : 4).toString(16)
+      : "-";
+  }
   return b;
 }
 
 // Maps for number <-> hex string conversion
 let _convertMapsInitialized = false;
 let _byteToHex: string[];
-let _hexToByte: {[k:string]: number};
+let _hexToByte: { [k: string]: number };
 
 function initConvertMaps() {
   _byteToHex = new Array(256);
   _hexToByte = {};
-  for (var i = 0; i < 256; i++) {
+  for (let i = 0; i < 256; i++) {
     _byteToHex[i] = (i + 0x100).toString(16).substr(1);
     _hexToByte[_byteToHex[i]] = i;
   }
@@ -358,9 +324,9 @@ export function guidToArray(s: string) {
   }
   let i = 0;
   const buf = new Uint8Array(16);
-  s.toLowerCase().replace(/[0-9a-f]{2}/g, (function(oct: number) {
+  s.toLowerCase().replace(/[0-9a-f]{2}/g, ((oct: number) => {
     switch (i) {
-      // .NET saves first three byte groups with differten endianness
+      // .NET saves first three byte groups with different endianness
       // See https://stackoverflow.com/a/16722909/3922220
       case 0: case 1: case 2: case 3:
         buf[3 - i++] = _hexToByte[oct];
@@ -392,16 +358,15 @@ export function arrayToGuid(buf: ArrayLike<number>) {
   if (!_convertMapsInitialized) {
     initConvertMaps();
   }
-  return _byteToHex[buf[ 3]] + _byteToHex[buf[ 2]] +
-         _byteToHex[buf[ 1]] + _byteToHex[buf[ 0]] + '-' +
-         _byteToHex[buf[ 5]] + _byteToHex[buf[ 4]] + '-' +
-         _byteToHex[buf[ 7]] + _byteToHex[buf[ 6]] + '-' +
-         _byteToHex[buf[ 8]] + _byteToHex[buf[ 9]] + '-' +
+  return _byteToHex[buf[3]] + _byteToHex[buf[2]] +
+         _byteToHex[buf[1]] + _byteToHex[buf[0]] + "-" +
+         _byteToHex[buf[5]] + _byteToHex[buf[4]] + "-" +
+         _byteToHex[buf[7]] + _byteToHex[buf[6]] + "-" +
+         _byteToHex[buf[8]] + _byteToHex[buf[9]] + "-" +
          _byteToHex[buf[10]] + _byteToHex[buf[11]] +
          _byteToHex[buf[12]] + _byteToHex[buf[13]] +
          _byteToHex[buf[14]] + _byteToHex[buf[15]];
 }
-/* tslint:enable */
 
 function notSupported(name: string): never {
   throw new Error("The environment doesn't support '" + name + "', please use a polyfill.");
@@ -424,8 +389,8 @@ export function fromBase64String(b64Encoded: string) {
   return bytes;
 }
 
-export function padLeft(str: string, len: number, char?: number, isRight?: boolean) {
-  const ch = char == null ? " " : String.fromCharCode(char);
+export function padLeft(str: string, len: number, ch?: string, isRight?: boolean) {
+  ch = ch || " ";
   len = len - str.length;
   for (let i = 0; i < len; i++) {
     str = isRight ? str + ch : ch + str;
@@ -433,8 +398,8 @@ export function padLeft(str: string, len: number, char?: number, isRight?: boole
   return str;
 }
 
-export function padRight(str: string, len: number, char?: number) {
-  return padLeft(str, len, char, true);
+export function padRight(str: string, len: number, ch?: string) {
+  return padLeft(str, len, ch, true);
 }
 
 export function remove(str: string, startIndex: number, count?: number) {
@@ -447,8 +412,8 @@ export function remove(str: string, startIndex: number, count?: number) {
   return str.slice(0, startIndex) + (typeof count === "number" ? str.substr(startIndex + count) : "");
 }
 
-export function replace(str: string, search: string|number, replace: string|number) {
-  return str.replace(new RegExp(escape(asString(search)), "g"), asString(replace));
+export function replace(str: string, search: string, replace: string) {
+  return str.replace(new RegExp(escape(search), "g"), replace);
 }
 
 export function replicate(n: number, x: string) {
@@ -459,10 +424,10 @@ export function getCharAtIndex(input: string, index: number) {
   if (index < 0 || index >= input.length) {
     throw new Error("Index was outside the bounds of the array.");
   }
-  return input.charCodeAt(index);
+  return input[index];
 }
 
-export function split(str: string, splitters: Array<string|number>, count?: number, removeEmpty?: number) {
+export function split(str: string, splitters: string[], count?: number, removeEmpty?: number) {
   count = typeof count === "number" ? count : null;
   removeEmpty = typeof removeEmpty === "number" ? removeEmpty : null;
   if (count < 0) {
@@ -471,9 +436,9 @@ export function split(str: string, splitters: Array<string|number>, count?: numb
   if (count === 0) {
     return [];
   }
-  if (!isArray(splitters)) {
+  if (!Array.isArray(splitters)) {
     if (removeEmpty === 0) {
-      return str.split(asString(splitters as any), count);
+      return str.split(splitters, count);
     }
     const len = arguments.length;
     splitters = Array(len - 1);
@@ -481,19 +446,11 @@ export function split(str: string, splitters: Array<string|number>, count?: numb
       splitters[key - 1] = arguments[key];
     }
   }
-  let pattern = " ";
-  const splittersLen = splitters.length;
-  if (splittersLen > 0) {
-    const temp = new Array(splittersLen);
-    // splitters may be an Uint16TypedArray of chars, we cannot use .map
-    for (let i = 0; i < splittersLen; i++) {
-      temp[i] = escape(asString(splitters[i]));
-    }
-    pattern = temp.join("|");
-  }
-  const reg = new RegExp(pattern, "g");
-  const splits: string[] = [];
+  splitters = splitters.map((x) => escape(x));
+  splitters = splitters.length > 0 ? splitters : [" "];
   let i = 0;
+  const splits: string[] = [];
+  const reg = new RegExp(splitters.join("|"), "g");
   while (count == null || count > 1) {
     const m = reg.exec(str);
     if (m === null) { break; }
@@ -509,43 +466,26 @@ export function split(str: string, splitters: Array<string|number>, count?: numb
   return splits;
 }
 
-export function trim(str: string, ...chars: number[]) {
+export function trim(str: string, ...chars: string[]) {
   if (chars.length === 0) {
     return str.trim();
   }
-  const pattern = "[" + escape(String.fromCharCode(...chars)) + "]+";
+  const pattern = "[" + escape(chars.join("")) + "]+";
   return str.replace(new RegExp("^" + pattern), "").replace(new RegExp(pattern + "$"), "");
 }
 
-export function trimStart(str: string, ...chars: number[]) {
+export function trimStart(str: string, ...chars: string[]) {
   return chars.length === 0
     ? (str as any).trimStart()
-    : str.replace(new RegExp("^[" + escape(String.fromCharCode(...chars)) + "]+"), "");
+    : str.replace(new RegExp("^[" + escape(chars.join("")) + "]+"), "");
 }
 
-export function trimEnd(str: string, ...chars: number[]) {
+export function trimEnd(str: string, ...chars: string[]) {
   return chars.length === 0
     ? (str as any).trimEnd()
-    : str.replace(new RegExp("[" + escape(String.fromCharCode(...chars)) + "]+$"), "");
+    : str.replace(new RegExp("[" + escape(chars.join("")) + "]+$"), "");
 }
 
-export function filter(pred: (c: number) => boolean, str: string) {
-  return fromCharArray(toCharArray(str).filter(pred));
-}
-
-export function map(f: (char: number) => number, str: string) {
-  return fromCharArray(toCharArray(str).map(f));
-}
-
-export function mapIndexed(f: (index: number, char: number) => number, str: string) {
-  return fromCharArray(toCharArray(str).map((c, i) => f(i, c)));
-}
-
-export function collect(f: (char: number) => string, str: string) {
-  const ar1 = toCharArray(str);
-  const ar2 = new Array(ar1.length);
-  for (let i = 0; i < ar1.length; i++) {
-    ar2[i] = f(ar1[i]);
-  }
-  return ar2.join("");
+export function filter(pred: (i: string) => boolean, x: string) {
+  return x.split("").filter(pred).join("");
 }

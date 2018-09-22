@@ -1,3 +1,42 @@
+### 2.0.0-beta-005
+
+* Update to FCS 25.0.1
+* Add replacements for System.Uri @JacobChang
+* Fix #1539: 0xFFFFFFFFu is read as 0u in REPL @ncave
+
+### 2.0.0-beta-004
+
+* Attach interface members to prototype (as in Fable 1, no cast needed anymore) #1562
+* Improvements in fable-core JS files @ncave
+* Fix #1551: Truncation of large unsigned bitwise op results @tomcl
+* Fix #1337: Add Option.contains @iyegoroff
+* Fix #1383: Range with longs
+* Fix abstract properties with getter and setter
+
+### 2.0.0-beta-003
+
+* Improve int64 conversions @tomcl #1546
+* Add full call path for errors in inlined functions
+* Fix #1545: Warning when casting to and interface not directly implemented
+* Fix extension member overloads
+
+### 2.0.0-beta-002
+
+* Compile chars as JS strings (as in Fable 1)
+* Add Map.TryGetValue
+* Add EnumToValue @zpodlovics #1522
+* Fix: Use operators as functions @xdaDaveShaw #1529
+* Fix hexadecimal printing @xdaDaveShaw #1535
+* Fix overloaded inline methods in other files @dgchurchill #1534
+* Fix #1516: Add warning if unit value is replaced
+* Fix #1533: Enable inheriting empty interfaces
+* Fix #1519: FSharpType.MakeTupleType
+* Fix extension member overloads
+* Fix: Check bitwise shift left for unsigned integers
+* Improvements in pattern matching compilation
+* Add --force-pkgs CLI option
+* Return non-zero error code when CLI arguments are wrong @theimowski #1515
+
 ### 2.0.0-beta-001
 
 * Fable 2 beta

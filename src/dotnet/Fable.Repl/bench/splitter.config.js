@@ -1,8 +1,9 @@
+const path = require("path");
 let babelOptions = {};
 
 if (process.argv.find(v => v === "--commonjs")) {
   babelOptions = {
-    plugins: ["transform-es2015-modules-commonjs"],
+    plugins: ["@babel/plugin-transform-modules-commonjs"],
   };
   console.log("Compiling to commmonjs...");
 } else {
@@ -25,8 +26,8 @@ const fableOptions = {
 };
 
 module.exports = {
-  entry: "./bench.fsproj",
-  outDir: "./out",
+  entry: path.join(__dirname, "./bench.fsproj"),
+  outDir: path.join(__dirname, "./out"),
   // port: 61225,
   babel: babelOptions,
   fable: fableOptions,

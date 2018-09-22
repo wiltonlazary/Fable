@@ -27,13 +27,13 @@ let private transformNewUnion com ctx r fsType
             let genArgs = makeGenArgs com ctx.GenericArgs genArgs
             Fable.NewErasedUnion(expr, genArgs) |> Fable.Value
         | _ -> "Erased Union Cases must have one single field: " + (getFsTypeFullName fsType)
-               |> addErrorAndReturnNull com r
+               |> addErrorAndReturnNull com ctx.InlinePath r
     | StringEnum(tdef, rule) ->
         let enumName = defaultArg tdef.TryFullName Naming.unknown
         match argExprs with
         | [] -> Fable.Enum(applyCaseRule rule unionCase |> Fable.StringEnum, enumName) |> Fable.Value
         | _ -> "StringEnum types cannot have fields: " + enumName
-               |> addErrorAndReturnNull com r
+               |> addErrorAndReturnNull com ctx.InlinePath r
     | OptionUnion typ ->
         let typ = makeType com ctx.GenericArgs typ
         let expr =
@@ -113,7 +113,7 @@ let private transformTraitCall com (ctx: Context) r typ (sourceTypes: FSharpType
             else resolveMemberCall entity genArgs traitName isInstance argTypes thisArg args
         | _ -> None
     ) |> Option.defaultWith (fun () ->
-        "Cannot resolve trait call " + traitName |> addErrorAndReturnNull com r)
+        "Cannot resolve trait call " + traitName |> addErrorAndReturnNull com ctx.InlinePath r)
 
 let private transformObjExpr (com: IFableCompiler) (ctx: Context) (objType: FSharpType)
                     baseCallExpr (overrides: FSharpObjectExprOverride list) otherOverrides =
@@ -135,7 +135,7 @@ let private transformObjExpr (com: IFableCompiler) (ctx: Context) (objType: FSha
                 if over.Signature.DeclaringType.HasTypeDefinition then
                     let tdef = over.Signature.DeclaringType.TypeDefinition
                     match tdef.TryFullName with
-                    | Some Types.enumerable ->
+                    | Some Types.ienumerableGeneric ->
                         name, Fable.ObjectIterator
                     | _ ->
                         // FSharpObjectExprOverride.CurriedParameterGroups doesn't offer
@@ -170,13 +170,6 @@ let private transformObjExpr (com: IFableCompiler) (ctx: Context) (objType: FSha
       let! members =
         (objType, overrides)::otherOverrides
         |> trampolineListMap (fun (typ, overrides) ->
-            let overrides =
-                if not typ.HasTypeDefinition then overrides else
-                let typName = typ.TypeDefinition.FullName.Replace(".","-")
-                overrides |> List.where (fun x ->
-                    typName + "-" + x.Signature.Name
-                    |> Naming.ignoredInterfaceMethods.Contains
-                    |> not)
             overrides |> trampolineListMap mapOverride)
 
       return Fable.ObjectExpr(members |> List.concat, makeType com ctx.GenericArgs objType, baseCall)
@@ -204,7 +197,7 @@ let private transformUnionCaseTest (com: IFableCompiler) (ctx: Context) r
     | ErasedUnion(tdef, genArgs) ->
         if unionCase.UnionCaseFields.Count <> 1 then
             return "Erased Union Cases must have one single field: " + (getFsTypeFullName fsType)
-            |> addErrorAndReturnNull com r
+            |> addErrorAndReturnNull com ctx.InlinePath r
         else
             let fi = unionCase.UnionCaseFields.[0]
             let typ =
@@ -233,20 +226,16 @@ let private transformUnionCaseTest (com: IFableCompiler) (ctx: Context) r
 let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
   trampoline {
     let r = makeRangeFrom fsExpr
-    let typ = makeType com ctx.GenericArgs fsExpr.Type
     match fsExpr with
-
     | BasicPatterns.Coerce(targetType, inpExpr) ->
         let! (inpExpr: Fable.Expr) = transformExpr com ctx inpExpr
         match tryDefinition targetType with
-        | Some interfaceEntity when interfaceEntity.IsInterface ->
-            let targetType = makeType com ctx.GenericArgs targetType
-            match inpExpr.Type with
-            | Fable.DeclaredType(sourceEntity,_) ->
-                return castToInterface com r targetType sourceEntity interfaceEntity inpExpr
-            | _ ->
-                return Replacements.tryInterfaceCast r targetType interfaceEntity.FullName inpExpr
-                |> Option.defaultValue inpExpr
+        | Some(interfaceEntity, Some interfaceFullName) when interfaceEntity.IsInterface ->
+            match interfaceFullName with
+            | Types.ienumerableGeneric | Types.ienumerable ->
+                let targetType = makeType com ctx.GenericArgs targetType
+                return Replacements.toSeq r targetType inpExpr
+            | _ -> return inpExpr
         | _ -> return inpExpr
 
     // TypeLambda is a local generic lambda
@@ -260,6 +249,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         let! callee = transformExprOpt com ctx callee
         let! args = transformExprList com ctx membArgs
         let genArgs = ownerGenArgs @ membGenArgs |> Seq.map (makeType com ctx.GenericArgs)
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return makeCallFrom com ctx r typ false genArgs callee args memb
 
     | CreateEvent (callee, eventName, memb, ownerGenArgs, membGenArgs, membArgs) ->
@@ -267,6 +257,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         let! args = transformExprList com ctx membArgs
         let callee = get None Fable.Any callee eventName
         let genArgs = ownerGenArgs @ membGenArgs |> Seq.map (makeType com ctx.GenericArgs)
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return makeCallFrom com ctx r typ false genArgs (Some callee) args memb
 
     // TODO: Detect if it's ResizeArray and compile as FastIntegerForLoop?
@@ -302,7 +293,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         | Some thisArg, _ | _, Some thisArg ->
             return { thisArg with Kind = Fable.BaseValueIdent; Type = typ } |> Fable.IdentExpr
         | _ ->
-            addError com r "Unexpected unbound this for base value"
+            addError com ctx.InlinePath r "Unexpected unbound this for base value"
             return Fable.Value(Fable.Null Fable.Any)
 
     | BasicPatterns.ThisValue _typ ->
@@ -311,7 +302,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         match ctx.BoundConstructorThis with
         | Some thisArg -> return Fable.IdentExpr thisArg
         | _ ->
-            addError com r "Unexpected unbound this"
+            addError com ctx.InlinePath r "Unexpected unbound this"
             return Fable.Value(Fable.Null Fable.Any)
 
     | BasicPatterns.Value var ->
@@ -321,7 +312,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
                 return! transformExpr com ctx fsExpr
             | None ->
                 return "Cannot resolve locally inlined value: " + var.DisplayName
-                |> addErrorAndReturnNull com r
+                |> addErrorAndReturnNull com ctx.InlinePath r
         else
             return makeValueFrom com ctx r var
 
@@ -354,6 +345,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
     // Applications
     // TODO: `argTypes2` is always empty, asked about its purpose
     | BasicPatterns.TraitCall(sourceTypes, traitName, flags, argTypes, _argTypes2, argExprs) ->
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return transformTraitCall com ctx r typ sourceTypes traitName flags argTypes argExprs
 
     | BasicPatterns.Call(callee, memb, ownerGenArgs, membGenArgs, args) ->
@@ -361,6 +353,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         let! args = transformExprList com ctx args
         // TODO: Check answer to #868 in FSC repo
         let genArgs = ownerGenArgs @ membGenArgs |> Seq.map (makeType com ctx.GenericArgs)
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return makeCallFrom com ctx r typ false genArgs callee args memb
 
     | BasicPatterns.Application(applied, genArgs, []) ->
@@ -383,7 +376,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
                 return Fable.Operation(Fable.CurriedApply(callee, args), typ, r)
         | None ->
             return "Cannot resolve locally inlined value: " + var.DisplayName
-            |> addErrorAndReturnNull com r
+            |> addErrorAndReturnNull com ctx.InlinePath r
 
     // When using Fable dynamic operator, we must untuple arguments
     // Note F# compiler wraps the value in a closure if it detects it's a lambda
@@ -393,7 +386,8 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         let! e2 = transformExpr com ctx e2
         let! args = transformExprList com ctx args
         let argInfo: Fable.ArgInfo =
-            { argInfo (Some e1) args None with Spread = Fable.TupleSpread }
+            { argInfo (Some e1) args Fable.AutoUncurrying with Spread = Fable.TupleSpread }
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return Fable.Operation(Fable.Call(Fable.InstanceCall(Some e2), argInfo), typ, r)
 
     // TODO: Ask: for some reason the F# compiler translates `x.IsSome` as `Application(Call(x, get_IsSome),[unit])`
@@ -404,6 +398,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
     | BasicPatterns.Application(applied, genArgs, args) ->
         let! applied = transformExpr com ctx applied
         let! args = transformExprList com ctx args
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return Fable.Operation(Fable.CurriedApply(applied, args), typ, r)
 
     | BasicPatterns.IfThenElse (guardExpr, thenExpr, elseExpr) ->
@@ -441,10 +436,12 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
             | Some callee -> callee
             | None -> entityRef com calleeType.TypeDefinition
         let kind = Fable.FieldGet(field.Name, field.IsMutable, makeType com Map.empty field.FieldType)
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return Fable.Get(callee, kind, typ, r)
 
     | BasicPatterns.TupleGet(_tupleType, tupleElemIndex, tupleExpr) ->
         let! tupleExpr = transformExpr com ctx tupleExpr
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return Fable.Get(tupleExpr, Fable.TupleGet tupleElemIndex, typ, r)
 
     | BasicPatterns.UnionCaseGet (unionExpr, fsType, unionCase, field) ->
@@ -453,7 +450,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         | ErasedUnion _ -> return unionExpr
         | StringEnum _ ->
             return "StringEnum types cannot have fields"
-            |> addErrorAndReturnNull com r
+            |> addErrorAndReturnNull com ctx.InlinePath r
         | OptionUnion t ->
             return Fable.Get(unionExpr, Fable.OptionValue, makeType com ctx.GenericArgs t, r)
         | ListUnion t ->
@@ -466,6 +463,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         | DiscriminatedUnion _ ->
             let t = makeType com Map.empty field.FieldType
             let kind = Fable.UnionField(field, unionCase, t)
+            let typ = makeType com ctx.GenericArgs fsExpr.Type
             return Fable.Get(unionExpr, kind, typ, r)
 
     | BasicPatterns.FSharpFieldSet(callee, calleeType, field, value) ->
@@ -482,7 +480,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         return Fable.Get(unionExpr, Fable.UnionTag, Fable.Any, r)
 
     | BasicPatterns.UnionCaseSet (_unionExpr, _type, _case, _caseField, _valueExpr) ->
-        return "Unexpected UnionCaseSet" |> addErrorAndReturnNull com r
+        return "Unexpected UnionCaseSet" |> addErrorAndReturnNull com ctx.InlinePath r
 
     | BasicPatterns.ValueSet (valToSet, valueExpr) ->
         let! valueExpr = transformExpr com ctx valueExpr
@@ -511,6 +509,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
     | BasicPatterns.NewObject(memb, genArgs, args) ->
         let! args = transformExprList com ctx args
         let genArgs = Seq.map (makeType com ctx.GenericArgs) genArgs
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return makeCallFrom com ctx r typ false genArgs None args memb
 
     | BasicPatterns.Sequential(ConstructorCall(baseCall,_,_), BasicPatterns.NewRecord(fsType, argExprs)) ->
@@ -521,7 +520,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
             return Fable.NewRecord(argExprs, fsType.TypeDefinition, genArgs) |> Fable.Value
         | _ ->
             return "Internal constructor with inheritance are not supported"
-            |> addErrorAndReturnNull com r
+            |> addErrorAndReturnNull com ctx.InlinePath r
 
     | BasicPatterns.Sequential (first, second) ->
         let! first = transformExpr com ctx first
@@ -566,19 +565,21 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
 
     | BasicPatterns.DecisionTreeSuccess(targetIndex, boundValues) ->
         let! boundValues = transformExprList com ctx boundValues
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         return Fable.DecisionTreeSuccess(targetIndex, boundValues, typ)
 
     | BasicPatterns.ILFieldGet(None, ownerTyp, fieldName) ->
         let ownerTyp = makeType com ctx.GenericArgs ownerTyp
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
         match Replacements.tryField typ ownerTyp fieldName with
         | Some expr -> return expr
         | None ->
             return sprintf "Cannot compile ILFieldGet(%A, %s)" ownerTyp fieldName
-            |> addErrorAndReturnNull com r
+            |> addErrorAndReturnNull com ctx.InlinePath r
 
     | BasicPatterns.Quote _ ->
         return "Quotes are not currently supported by Fable"
-        |> addErrorAndReturnNull com r
+        |> addErrorAndReturnNull com ctx.InlinePath r
 
     // TODO: Ask. I see this when accessing Result types (all structs?)
     | BasicPatterns.AddressOf(expr) ->
@@ -590,7 +591,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
     // | BasicPatterns.ILAsm _
     | expr ->
         return sprintf "Cannot compile expression %A" expr
-        |> addErrorAndReturnNull com r
+        |> addErrorAndReturnNull com ctx.InlinePath r
   }
 
 let private isImportedEntity (ent: FSharpEntity) =
@@ -614,7 +615,6 @@ let private isIgnoredMember (meth: FSharpMemberOrFunctionOrValue) =
             match att.AttributeType.TryFullName with
             | Some(Atts.global_ | Atts.emit | Atts.erase) -> true
             | _ -> false)
-        || Naming.ignoredInterfaceMethods.Contains meth.CompiledName
         || (match meth.DeclaringEntity with
             | Some ent -> isImportedEntity ent
             | None -> false)
@@ -644,14 +644,14 @@ let rec private getBaseConsAndBody com ctx (baseType: FSharpType option) acc bod
                 let argInfo: Fable.ArgInfo =
                   { ThisArg = thisArg
                     Args = args
-                    SignatureArgTypes = getArgTypes com baseCall |> Some
+                    SignatureArgTypes = getArgTypes com baseCall |> Fable.Typed
                     Spread = Fable.NoSpread
                     IsBaseOrSelfConstructorCall = true }
                 baseRef, staticCall r Fable.Unit argInfo baseRef
             | None ->
                 if not(hasImplicitConstructor baseEntity) then
                     "Classes without a primary constructor cannot be inherited: " + baseEntity.FullName
-                    |> addError com None
+                    |> addError com ctx.InlinePath None
                 let baseCons = makeCallFrom com ctx r Fable.Unit true genArgs thisArg baseArgs baseCall
                 entityRefMaybeImported com baseEntity, baseCons)
 
@@ -671,10 +671,11 @@ let rec private getBaseConsAndBody com ctx (baseType: FSharpType option) acc bod
     // TODO: Kindda unexpected, log warning?
     | body -> None, transformBodyStatements com ctx acc body
 
-let private transformImplicitConstructor com ctx (memb: FSharpMemberOrFunctionOrValue) args (body: FSharpExpr) =
+let private transformImplicitConstructor com (ctx: Context)
+            (memb: FSharpMemberOrFunctionOrValue) args (body: FSharpExpr) =
     match memb.DeclaringEntity with
     | None -> "Unexpected constructor without declaring entity: " + memb.FullName
-              |> addError com None; []
+              |> addError com ctx.InlinePath None; []
     | Some ent ->
         let bodyCtx, args = bindMemberArgs com ctx args
         let boundThis = com.GetUniqueVar("this") |> makeIdent
@@ -700,7 +701,9 @@ let private transformImplicitConstructor com ctx (memb: FSharpMemberOrFunctionOr
               BoundConstructorThis = boundThis
               Body = body
             }
-        [Fable.ClassImplicitConstructor info |> Fable.ConstructorDeclaration]
+        // TODO!!! When adding a ConstructorDeclaration check if there are
+        // name clashes for interface/abstract members
+        [Fable.ConstructorDeclaration(Fable.ClassImplicitConstructor info)]
 
 /// When using `importMember`, uses the member display name as selector
 let private importExprSelector (memb: FSharpMemberOrFunctionOrValue) selector =
@@ -713,8 +716,7 @@ let private transformImport r typ isPublic name selector path =
     let info: Fable.ValueDeclarationInfo =
         { Name = name
           IsPublic = isPublic
-          // TODO!!!: compile imports as ValueDeclarations
-          // (check if they're mutable, see #1314)
+          // TODO: Check if they're mutable, see #1314
           IsMutable = false
           IsEntryPoint = false
           HasSpread = false }
@@ -731,7 +733,7 @@ let private transformMemberValue (com: IFableCompiler) ctx isPublic name (memb: 
             "Change declaration of member: " + name + "\n"
             + "Importing JS functions with multiple arguments as `let add: int->int->int` won't uncurry parameters." + "\n"
             + "Use following syntax: `let add (x:int) (y:int): int = import ...`"
-            |> addError com None
+            |> addError com ctx.InlinePath None
         | _ -> ()
         let selector = importExprSelector memb selector
         transformImport r typ isPublic name selector path
@@ -758,7 +760,7 @@ let private transformMemberFunction (com: IFableCompiler) ctx isPublic name (mem
         let fn = Fable.Function(Fable.Delegate args, body, Some name)
         // If this is a static constructor, call it immediately
         if memb.CompiledName = ".cctor" then
-            let apply = staticCall None Fable.Unit (argInfo None [] None) fn
+            let apply = staticCall None Fable.Unit (argInfo None [] Fable.NoUncurrying) fn
             [Fable.ActionDeclaration apply]
         else
             let info: Fable.ValueDeclarationInfo =
@@ -782,10 +784,11 @@ let private transformMemberFunctionOrValue (com: IFableCompiler) ctx (memb: FSha
         then transformMemberValue com ctx isPublic name memb body
         else transformMemberFunction com ctx isPublic name memb args body
 
-let private transformOverride (com: FableCompiler) ctx (memb: FSharpMemberOrFunctionOrValue) args (body: FSharpExpr) =
+let private transformAttachedMember (com: FableCompiler) (ctx: Context)
+            (memb: FSharpMemberOrFunctionOrValue) args (body: FSharpExpr) =
     match memb.DeclaringEntity with
     | None -> "Unexpected override without declaring entity: " + memb.FullName
-              |> addError com None; []
+              |> addError com ctx.InlinePath None; []
     | Some ent ->
         let bodyCtx, args = bindMemberArgs com ctx args
         let body = transformExpr com bodyCtx body |> run
@@ -798,47 +801,39 @@ let private transformOverride (com: FableCompiler) ctx (memb: FSharpMemberOrFunc
             | _ when memb.CompiledName = "System-Collections-Generic-IEnumerable`1-GetEnumerator" ->
                 Fable.ObjectIterator
             | _ -> Fable.ObjectMethod (hasSeqSpread memb)
-        let info: Fable.OverrideDeclarationInfo =
+        let info: Fable.AttachedMemberDeclarationInfo =
             { Name = memb.DisplayName
               Kind = kind
               EntityName = getEntityDeclarationName com ent }
-        [Fable.OverrideDeclaration(args, body, info)]
-
-let private transformInterfaceImplementation (com: FableCompiler) ctx (memb: FSharpMemberOrFunctionOrValue) args (body: FSharpExpr) =
-    if Set.contains memb.CompiledName Naming.interfaceMethodsImplementedInPrototype
-    then transformOverride com ctx memb args body
-    else
-        let bodyCtx, args = bindMemberArgs com ctx args
-        let body = transformExpr com bodyCtx body |> run
-        let value = Fable.Function(Fable.Delegate args, body, None)
-        let kind =
-            if memb.IsPropertyGetterMethod && countNonCurriedParams memb = 0
-            then Fable.ObjectGetter
-            elif memb.IsPropertySetterMethod && countNonCurriedParams memb = 1
-            then Fable.ObjectSetter
-            else hasSeqSpread memb |> Fable.ObjectMethod
-        let objMember = Fable.ObjectMember(makeStrConst memb.DisplayName, value, kind)
-        com.AddInterfaceImplementation(memb, objMember)
-        []
+        [Fable.AttachedMemberDeclaration(args, body, info)]
 
 let private transformMemberDecl (com: FableCompiler) (ctx: Context) (memb: FSharpMemberOrFunctionOrValue)
                                 (args: FSharpMemberOrFunctionOrValue list list) (body: FSharpExpr) =
     let ctx = { ctx with EnclosingMember = Some memb }
     if isIgnoredMember memb
     then []
+    // TODO: Compiler flag to output pseudo-inline expressions? (e.g. for REPL libs)
     elif isInline memb then
-        // TODO: Compiler flag to output pseudo-inline expressions? (e.g. for REPL libs)
-        com.AddInlineExpr(memb, (List.concat args, body))
+        let inlineExpr = { Args = List.concat args
+                           Body = body
+                           FileName = (com :> ICompiler).CurrentFile }
+        com.AddInlineExpr(memb, inlineExpr)
         []
     elif memb.IsImplicitConstructor
     then transformImplicitConstructor com ctx memb args body
-    elif memb.IsExplicitInterfaceImplementation
-    then transformInterfaceImplementation com ctx memb args body
+    elif memb.IsExplicitInterfaceImplementation then
+        if Set.contains memb.CompiledName Naming.interfaceMethodsImplementedInPrototype
+        then transformAttachedMember com ctx memb args body
+        else
+            match tryGetInterfaceDefinitionFromMethod memb with
+            | Some interfaceEntity when not(Naming.ignoredInterfaces.Contains interfaceEntity.FullName) ->
+                transformAttachedMember com ctx memb args body
+            | _ -> []
     elif memb.IsOverrideOrExplicitInterfaceImplementation
-    then transformOverride com ctx memb args body
+    then transformAttachedMember com ctx memb args body
     else transformMemberFunctionOrValue com ctx memb args body
 
-let private transformDeclarations (com: FableCompiler) rootEnt rootDecls =
+let private transformDeclarations (com: FableCompiler) ctx rootEnt rootDecls =
     let rec transformDeclarationsInner (com: FableCompiler) (ctx: Context) fsDecls =
         fsDecls |> List.collect (fun fsDecl ->
             match fsDecl with
@@ -853,34 +848,29 @@ let private transformDeclarations (com: FableCompiler) rootEnt rootDecls =
                 | None when ent.IsFSharpUnion && not (isErasedUnion ent) ->
                     let entityName = getEntityDeclarationName com ent
                     com.AddUsedVarName(entityName)
-                    // TODO!!! Check Equality/Comparison attributes
+                    // TODO: Check Equality/Comparison attributes
                     let info: Fable.UnionConstructorInfo =
                       { Entity = ent
                         EntityName = entityName
                         IsPublic = isPublicEntity ent }
-                    [Fable.UnionConstructor info |> Fable.ConstructorDeclaration]
+                    [Fable.ConstructorDeclaration(Fable.UnionConstructor info)]
                 | None when ent.IsFSharpRecord
                         || ent.IsFSharpExceptionDeclaration
                         || ((ent.IsClass || ent.IsValueType) && not ent.IsMeasure && not (hasImplicitConstructor ent)) ->
                     let entityName = getEntityDeclarationName com ent
                     com.AddUsedVarName(entityName)
-                    // TODO!!! Check Equality/Comparison attributes
+                    // TODO: Check Equality/Comparison attributes
                     let info: Fable.CompilerGeneratedConstructorInfo =
                       { Entity = ent
                         EntityName = entityName
                         IsPublic = isPublicEntity ent }
-                    [Fable.CompilerGeneratedConstructor info |> Fable.ConstructorDeclaration]
+                    [Fable.ConstructorDeclaration(Fable.CompilerGeneratedConstructor info)]
                 | None ->
-                    // Cast for empty interfaces is erased, so they must not inherit members
-                    if ent.IsInterface && ent.MembersFunctionsAndValues.Count = 0 && isInterfaceInheritingMembers ent then
-                        sprintf "Empty interfaces cannot inherit members: %s" ent.FullName
-                        |> addError com None
                     transformDeclarationsInner com { ctx with EnclosingEntity = Some ent } sub
             | FSharpImplementationFileDeclaration.MemberOrFunctionOrValue(meth, args, body) ->
                 transformMemberDecl com ctx meth args body
             | FSharpImplementationFileDeclaration.InitAction fe ->
-                [transformExpr com ctx fe |> run |> Fable.ActionDeclaration]
-        )
+                [transformExpr com ctx fe |> run |> Fable.ActionDeclaration])
     // In case this is a recursive module, do a first pass to add
     // all entity and member names as used var names
     rootDecls |> List.iter (function
@@ -890,11 +880,7 @@ let private transformDeclarations (com: FableCompiler) rootEnt rootDecls =
             com.AddUsedVarName(memb.CompiledName)
         | FSharpImplementationFileDeclaration.InitAction _ -> ()
     )
-    let decls = transformDeclarationsInner com (Context.Create rootEnt) rootDecls
-    let interfaceImplementations =
-        com.InterfaceImplementations.Values |> Seq.map (fun (info, objMember) ->
-            Fable.InterfaceCastDeclaration(Seq.toList objMember, info)) |> Seq.toList
-    decls @ interfaceImplementations
+    transformDeclarationsInner com ctx rootDecls
 
 let private getRootModuleAndDecls decls =
     let (|CommonNamespace|_|) = function
@@ -941,51 +927,18 @@ let private tryGetMemberArgsAndBody com (implFiles: Map<string, FSharpImplementa
 type FableCompiler(com: ICompiler, implFiles: Map<string, FSharpImplementationFileContents>) =
     member val UsedVarNames = HashSet<string>()
     member val Dependencies = HashSet<string>()
-    member val InterfaceImplementations: Dictionary<_,_> = Dictionary()
     member this.AddUsedVarName(varName) =
         this.UsedVarNames.Add(varName) |> ignore
-    member __.AddInlineExpr(memb, inlineExpr) =
+    member __.AddInlineExpr(memb, inlineExpr: InlineExpr) =
         let fullName = getMemberUniqueName com memb
         com.GetOrAddInlineExpr(fullName, fun () -> inlineExpr) |> ignore
-    member this.AddInterfaceImplementation(memb: FSharpMemberOrFunctionOrValue, objMemb: Fable.ObjectMember) =
-        match memb.DeclaringEntity, tryGetInterfaceDefinitionFromMethod memb with
-        | Some implementingEntity, Some interfaceEntity ->
-            let castFunctionName = getCastDeclarationName com implementingEntity interfaceEntity.FullName
-            let inheritedInterfaces =
-                if interfaceEntity.AllInterfaces.Count > 1 then
-                    interfaceEntity.AllInterfaces |> Seq.choose (fun t ->
-                        if t.HasTypeDefinition then
-                            let fullName = getCastDeclarationName com implementingEntity t.TypeDefinition.FullName
-                            if fullName <> castFunctionName then Some fullName else None
-                        else None)
-                    |> Seq.toList
-                else []
-            match this.InterfaceImplementations.TryGetValue(castFunctionName) with
-            | false, _ ->
-                let info: Fable.InterfaceCastDeclarationInfo =
-                    { Name = castFunctionName
-                      IsPublic = not implementingEntity.Accessibility.IsPrivate
-                      ImplementingType = implementingEntity
-                      InterfaceType = interfaceEntity
-                      InheritedInterfaces = inheritedInterfaces
-                    }
-                let members = ResizeArray()
-                members.Add(objMemb)
-                this.UsedVarNames.Add(castFunctionName) |> ignore
-                this.InterfaceImplementations.Add(castFunctionName, (info, members) )
-            | true, (_, members) -> members.Add(objMemb)
-        | _ ->
-            "Cannot find implementing and/or interface entities for " + memb.FullName
-            |> addError com None
     interface IFableCompiler with
         member this.Transform(ctx, fsExpr) =
             transformExpr this ctx fsExpr |> run
         member this.TryReplace(ctx, r, t, info, thisArg, args) =
             Replacements.tryCall this ctx r t info thisArg args
-        member __.TryReplaceInterfaceCast(r, t, name, e) =
-            Replacements.tryInterfaceCast r t name e
-        member this.InjectArgument(enclosingEntity, r, genArgs, parameter) =
-            Inject.injectArg this enclosingEntity r genArgs parameter
+        member this.InjectArgument(ctx, r, genArgs, parameter) =
+            Inject.injectArg this ctx r genArgs parameter
         member this.GetInlineExpr(memb) =
             let fileName =
                 (getMemberLocation memb).FileName
@@ -995,7 +948,10 @@ type FableCompiler(com: ICompiler, implFiles: Map<string, FSharpImplementationFi
             let fullName = getMemberUniqueName com memb
             com.GetOrAddInlineExpr(fullName, fun () ->
                 match tryGetMemberArgsAndBody com implFiles fileName memb with
-                | Some(args, body) -> List.concat args, body
+                | Some(args, body) ->
+                    { Args = List.concat args
+                      Body = body
+                      FileName = fileName }
                 | None -> failwith ("Cannot find inline member " + memb.FullName))
         member this.AddUsedVarName(varName) =
             this.AddUsedVarName(varName) |> ignore
@@ -1026,9 +982,10 @@ let transformFile (com: ICompiler) (implFiles: Map<string, FSharpImplementationF
             match Map.tryFind com.CurrentFile implFiles with
             | Some file -> file
             | None -> failwithf "File %s doesn't belong to parsed project" com.CurrentFile
-        let fcom = FableCompiler(com, implFiles)
         let rootEnt, rootDecls = getRootModuleAndDecls file.Declarations
-        let rootDecls = transformDeclarations fcom rootEnt rootDecls
+        let fcom = FableCompiler(com, implFiles)
+        let ctx = Context.Create(rootEnt)
+        let rootDecls = transformDeclarations fcom ctx rootEnt rootDecls
         Fable.File(com.CurrentFile, rootDecls, set fcom.UsedVarNames, set fcom.Dependencies)
     with
     | ex -> exn (sprintf "%s (%s)" ex.Message com.CurrentFile, ex) |> raise

@@ -1,6 +1,8 @@
+import Long, { makeRangeStepFunction } from "./Long";
 import { Some, some, value } from "./Option";
 import { compare, equals, IComparer, IDisposable, isDisposable } from "./Util";
 
+declare type Long = typeof Long;
 type Option<T> = T | Some;
 
 export interface IEnumerator<T> {
@@ -252,6 +254,10 @@ export function exists2<T1, T2>(f: (x: T1, y: T2) => boolean, xs: Iterable<T1>, 
     if (f(cur1.value, cur2.value)) { return true; }
   }
   return false;
+}
+
+export function contains<T>(i: T, xs: Iterable<T>) {
+  return exists((x) => equals(x, i), xs);
 }
 
 export function filter<T>(f: (x: T) => boolean, xs: Iterable<T>) {
@@ -521,19 +527,20 @@ export function pairwise<T extends number>(xs: Iterable<T>) {
   return skip(2, scan((last, next) => [last[1], next], [0, 0], xs));
 }
 
-export function rangeStep(first: number, step: number, last: number) {
+export function rangeChar(first: string, last: string) {
+  return delay(() => unfold((x) => x <= last ? [x, String.fromCharCode(x.charCodeAt(0) + 1)] : null, first));
+}
+
+export function rangeLong(first: Long, step: Long, last: Long, unsigned?: boolean) {
+  const stepFn = makeRangeStepFunction(step, last, unsigned);
+  return delay(() => unfold(stepFn as any, first));
+}
+
+export function rangeNumber(first: number, step: number, last: number) {
   if (step === 0) {
     throw new Error("Step cannot be 0");
   }
   return delay(() => unfold((x) => step > 0 && x <= last || step < 0 && x >= last ? [x, x + step] : null, first));
-}
-
-export function rangeChar(first: number, last: number) {
-  return delay(() => unfold((x) => x <= last ? [x, x + 1] : null, first));
-}
-
-export function range(first: number, last: number) {
-  return rangeStep(first, 1, last);
 }
 
 export function readOnly<T>(xs: Iterable<T>) {

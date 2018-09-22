@@ -59,7 +59,7 @@ module Types =
     let [<Literal>] iset = "System.Collections.Generic.ISet`1"
     let [<Literal>] fsharpMap = "Microsoft.FSharp.Collections.FSharpMap`2"
     let [<Literal>] fsharpSet = "Microsoft.FSharp.Collections.FSharpSet`1"
-    let [<Literal>] enumerable = "System.Collections.Generic.IEnumerable`1"
+    let [<Literal>] ienumerableGeneric = "System.Collections.Generic.IEnumerable`1"
     let [<Literal>] ienumerable = "System.Collections.IEnumerable"
     let [<Literal>] icomparable = "System.IComparable"
     let [<Literal>] idisposable = "System.IDisposable"
@@ -144,14 +144,34 @@ module Extensions =
 module Log =
     open Fable
 
-    let addWarning (com: ICompiler) (range: SourceLocation option) (warning: string) =
-        com.AddLog(warning, Severity.Warning, ?range=range, fileName=com.CurrentFile)
+    let private addLog (com: ICompiler) inlinePath range msg severity =
+        let printInlineSource refPath path r =
+            let path = Path.getRelativeFileOrDirPath false refPath false path
+            match r with
+            | Some r -> sprintf "%s(%i,%i)" path r.start.line r.start.column
+            | None -> path
+        let rec buildInlinePath acc refPath r = function
+            | [] ->
+                (printInlineSource refPath com.CurrentFile r)::acc
+                |> List.rev |> String.concat " < "
+                |> (+) " - Inline call from "
+            | (file,r2)::rest ->
+                let acc = (printInlineSource refPath file r)::acc
+                buildInlinePath acc refPath r2 rest
+        let actualFile, msg =
+            match inlinePath with
+            | [] -> com.CurrentFile, msg
+            | (file,r)::inlinePath -> file, msg + (buildInlinePath [] file r inlinePath)
+        com.AddLog(msg, severity, ?range=range, fileName=actualFile)
 
-    let addError (com: ICompiler) (range: SourceLocation option) (error: string) =
-        com.AddLog(error, Severity.Error, ?range=range, fileName=com.CurrentFile)
+    let addWarning (com: ICompiler) inlinePath range warning =
+        addLog com inlinePath range warning Severity.Warning
 
-    let addErrorAndReturnNull (com: ICompiler) (range: SourceLocation option) (error: string) =
-        com.AddLog(error, Severity.Error, ?range=range, fileName=com.CurrentFile)
+    let addError (com: ICompiler) inlinePath range error =
+        addLog com inlinePath range error Severity.Error
+
+    let addErrorAndReturnNull (com: ICompiler) inlinePath range error =
+        addLog com inlinePath range error Severity.Error
         AST.Fable.Null AST.Fable.Any |> AST.Fable.Value
 
     let attachRange (range: SourceLocation option) msg =
