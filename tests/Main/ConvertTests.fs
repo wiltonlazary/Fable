@@ -88,6 +88,7 @@ let tests =
 
     testCase "System.Int64.Parse works" <| fun () ->
         Int64.Parse("5") |> equal 5L
+        Int64.Parse("-5") |> equal -5L
         (fun () -> Int64.Parse("5f")) |> throwsError ""
 
     testCase "System.Int64.Parse with hex works" <| fun () ->
@@ -482,6 +483,15 @@ let tests =
     testCase "Convert between (un)signed long" <| fun () -> // See #1485
         int64 System.UInt64.MaxValue |> equal -1L
         uint64 -1L |> equal System.UInt64.MaxValue
+
+    testCase "int64 can parse signed longs" <| fun () -> // See #1586
+        let a = int64 "5"
+        let b = int64 "-5"
+        let c = int64 "+5"
+        equal 5L a
+        equal -5L b
+        a = b |> equal false
+        a = c |> equal true
 
     testCase "System.Convert.ToSingle works" <| fun () ->
         let x = 1.f

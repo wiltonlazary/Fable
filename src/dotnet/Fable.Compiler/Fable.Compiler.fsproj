@@ -2,8 +2,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Fable: F# to JS Compiler</Description>
-    <Version>2.0.0</Version>
-    <PackageVersion>2.0.0-beta-005</PackageVersion>
+    <Version>2.0.3</Version>
+    <PackageVersion>2.0.3</PackageVersion>
     <OutputType>Exe</OutputType>
     <PackageType>DotnetCliTool</PackageType>
     <AssemblyName>dotnet-fable</AssemblyName>
@@ -21,9 +21,9 @@
     <Compile Include="Transforms/Transforms.Util.fs" />
     <Compile Include="Transforms/OverloadSuffix.fs" />
     <Compile Include="Transforms/FSharp2Fable.Util.fs" />
-    <Compile Include="Transforms/Inject.fs" />
     <Compile Include="Transforms/ReplacementsInject.fs" />
     <Compile Include="Transforms/Replacements.fs" />
+    <Compile Include="Transforms/Inject.fs" />
     <Compile Include="Transforms/FSharp2Fable.fs" />
     <Compile Include="Transforms/FableTransforms.fs" />
     <Compile Include="Transforms/Fable2Babel.fs" />

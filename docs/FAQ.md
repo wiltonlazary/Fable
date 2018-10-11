@@ -6,9 +6,38 @@ This is the section for quick questions or to miss the holes in the documentatio
 
 #### How can I add a new question?
 
-Make sure the question is not answered already either here or in the documentation. Then just [click here to edit this page in Github](https://github.com/fable-compiler/Fable/edit/master/docs/FAQ.md), add your question to the bottom and create a PR. Maintainers will write an answer and ask you if that solves the issue. If it does, the PR will be merged and the question will be added to the page so it can be referenced by other users.
+Make sure the question is not answered already either here or in the documentation. Then just [click here to edit this page in Github](https://github.com/fable-compiler/Fable/blob/master/docs/FAQ.md), add your question to the bottom and create a PR. Maintainers will write an answer and ask you if that solves the issue. If it does, the PR will be merged and the question will be added to the page so it can be referenced by other users.
 
 ## Compiler
+
+#### How does Fable work?
+
+Fable has two "hearts" or sides: the .NET side is a daemon (a lightweight TCP server listening by default on port 61225) that waits for messages containing the F# source (.fs) or project (.fsproj) file to parse together with other options, and returns its contents in the form of a [Babel compliant AST](https://github.com/babel/babel/blob/master/packages/babel-parser/ast/spec.md).
+
+On the other side, there is a JS client that takes care of watching the files, communicating with the Fable daemon, resolving npm dependencies and outputting the actual JS code. At the time of writing there are three JS clients for Fable available:
+
+* [fable-loader](https://www.npmjs.com/package/fable-loader) is a plugin for [Webpack](https://webpack.js.org/), a powerful JS bundler with many handy features for development, like live reloading.
+* [rollup-plugin-fable](https://www.npmjs.com/package/rollup-plugin-fable) for [Rollup](https://rollupjs.org/), another bundler focused on tree shaking.
+* [fable-splitter](https://www.npmjs.com/package/fable-splitter) is a standalone tool which, unlike the previous ones, outputs separated files instead of a single bundle.
+
+> All the clients need a configuration file, click the links above for more details.
+
+The usual way to run a JS tool is a [package.json script](https://docs.npmjs.com/misc/scripts), so when you type `npm run build` this will invoke a command named "build" within the "scripts" property of the package.json file. For convenience, you can tell Fable to automatically start the package.json script and stop whenever it finishes:
+
+```shell
+dotnet fable npm-run build
+```
+
+The Fable daemon must be invoked in a directory with an .fsproj including a [dotnet CLI tool reference](https://docs.microsoft.com/en-us/dotnet/core/tools/extensibility#per-project-based-extensibility) to the `dotnet-fable` Nuget package ([how to manage CLI tools with Paket](https://fsprojects.github.io/Paket/nuget-dependencies.html#Special-case-CLI-tools)). Run `dotnet fable --help` to know more about the Fable daemon specific options.
+
+It is also possible to run the Fable daemon and the JS clients separately if necessary:
+
+```shell
+dotnet fable start
+
+# In a different shell
+npm run build
+```
 
 #### Can I use Type Providers with Fable?
 
@@ -25,6 +54,27 @@ printfn "only printing in production bundle"
 ```
 
 You can define compilation directives using the `define` option in your Fable client. Latest [fable-loader](https://www.npmjs.com/package/fable-loader) will automatically define `DEBUG` when running Webpack in development mode.
+
+#### How can I make the compilation fail on incomplete pattern matches?
+
+Fable emits a warning on incomplete pattern matching expressions by default. To turn this particular warning into an error, add the following block to your project file:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- ... -->
+
+  <PropertyGroup>
+    <!-- FS0025: Incomplete pattern matches on this expression. -->
+    <WarningsAsErrors>25</WarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- ... -->
+</Project>
+```
+
+This setting will not only make your compilation process fail on the command line, but will also make your IDE show an error at the location in the source code.
+
+To turn more warnings into errors, separate them with commas or semicolons.
 
 #### How are numbers compiled to JS?
 
@@ -117,3 +167,4 @@ The F# source code and the F# project file have to be included in the Nuget Pack
 ```
 
 Possible cryptic error message when you don't include the project file and/or source files is `Cannot find root module`.
+

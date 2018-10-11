@@ -1,3 +1,25 @@
+### 2.0.3
+
+* Fix #1588: MailboxProcessor.PostAndAsyncReply with falsy values @nilekirk
+* Fix #1586: Parsing signed longs @ncave
+* Fix #1585: Timespan milliseconds to int conversion
+* Fix #1386: Proper convertion to .NET delegates
+* More fixes for optimization switch @ncave
+
+### 2.0.2
+
+* Fix #1583: Generated idents must always be unique
+* Fix #1582: Enable Seq.sum(By)/average(By) with custom types
+* Fixes for optimization switch @ncave
+
+### 2.0.1
+
+* Fix sorting of Fable dependencies
+
+### 2.0.0
+
+* Fable 2
+
 ### 2.0.0-beta-005
 
 * Update to FCS 25.0.1

@@ -8,6 +8,7 @@ open Microsoft.FSharp.Compiler.SourceCodeServices
 let visit f e =
     match e with
     | IdentExpr _ | Debugger _ -> e
+    | TypeCast(e, t) -> TypeCast(f e, t)
     | Import(e1, e2, kind, t, r) -> Import(f e1, f e2, kind, t, r)
     | Value kind ->
         match kind with
@@ -32,9 +33,7 @@ let visit f e =
     | Test(e, kind, r) -> Test(f e, kind, r)
     | DelayedResolution(kind, t, r) ->
         match kind with
-        | AsInterface(e, cast, name) -> DelayedResolution(AsInterface(f e, cast, name), t, r)
         | AsPojo(e1, e2) -> DelayedResolution(AsPojo(f e1, f e2), t, r)
-        | AsUnit e -> DelayedResolution(AsUnit(f e), t, r)
         | Curry(e, arity) -> DelayedResolution(Curry(f e, arity), t, r)
     | Function(kind, body, name) -> Function(kind, f body, name)
     | ObjectExpr(members, t, baseCall) ->
@@ -107,6 +106,7 @@ let rec visitFromOutsideIn (f: Expr->Expr option) e =
 
 let getSubExpressions = function
     | IdentExpr _ | Debugger _ -> []
+    | TypeCast(e,_) -> [e]
     | Import(e1,e2,_,_,_) -> [e1;e2]
     | Value kind ->
         match kind with
@@ -127,7 +127,7 @@ let getSubExpressions = function
     | Test(e, _, _) -> [e]
     | DelayedResolution(kind, _, _) ->
         match kind with
-        | AsInterface(e,_,_) | AsUnit e | Curry(e,_) -> [e]
+        | Curry(e,_) -> [e]
         | AsPojo(e1, e2) -> [e1; e2]
     | Function(_, body, _) -> [body]
     | ObjectExpr(members, _, baseCall) ->
@@ -310,7 +310,7 @@ module private Transforms =
             // Remove currying for dynamic operations (no arity)
             | None -> true
         match expr, expr with
-        | LambdaUncurriedAtCompileTime arity lambda, _ -> lambda
+        | MaybeCasted(LambdaUncurriedAtCompileTime arity lambda), _ -> lambda
         | _, DelayedResolution(Curry(innerExpr, arity2),_,_)
             when matches arity arity2 -> innerExpr
         | _, Get(DelayedResolution(Curry(innerExpr, arity2),_,_), OptionValue, t, r)
@@ -324,7 +324,7 @@ module private Transforms =
 
     // For function arguments check if the arity of their own function arguments is expected or not
     // TODO: Do we need to do this recursively, and check options and delegates too?
-    let checkSubArguments expectedType (expr: Expr) =
+    let checkSubArguments com expectedType (expr: Expr) =
         match expectedType, expr with
         | NestedLambdaType(expectedArgs,_), ExprType(NestedLambdaType(actualArgs, returnType))
                 when List.sameLength expectedArgs actualArgs ->
@@ -343,8 +343,7 @@ module private Transforms =
             if Map.isEmpty replacements
             then expr
             else
-                let args = [ for i=1 to List.length actualArgs do
-                                yield makeIdent ("arg" + string i) ]
+                let args = List.map (fun _ -> makeIdentUnique com "arg") actualArgs
                 let argExprs =
                     args |> List.mapi (fun i arg ->
                         let argExpr = IdentExpr arg
@@ -360,7 +359,7 @@ module private Transforms =
                 makeLambda args body
         | _ -> expr
 
-    let uncurryArgs argTypes args =
+    let uncurryArgs com argTypes args =
         let mapArgs f argTypes args =
             let rec mapArgsInner f acc argTypes args =
                 match argTypes, args with
@@ -374,7 +373,7 @@ module private Transforms =
         | NoUncurrying | Typed [] -> args // Do nothing
         | Typed argTypes ->
             (argTypes, args) ||> mapArgs (fun expectedType arg ->
-                let arg = checkSubArguments expectedType arg
+                let arg = checkSubArguments com expectedType arg
                 let arity = getLambdaTypeArity expectedType
                 if arity > 1
                 then uncurryExpr (Some arity) arg
@@ -437,18 +436,18 @@ module private Transforms =
                 fields
                 |> Seq.map (fun fi -> FSharp2Fable.TypeHelpers.makeType com Map.empty fi.FieldType)
                 |> Seq.toList
-            uncurryArgs (Typed argTypes) args
+            uncurryArgs com (Typed argTypes) args
         match e with
         | Operation(Call(kind, info), t, r) ->
-            let info = { info with Args = uncurryArgs info.SignatureArgTypes info.Args }
+            let info = { info with Args = uncurryArgs com info.SignatureArgTypes info.Args }
             Operation(Call(kind, info), t, r)
         | Operation(CurriedApply(callee, args), t, r) ->
             match callee.Type with
             | NestedLambdaType(argTypes, _) ->
-                Operation(CurriedApply(callee, uncurryArgs (Typed argTypes) args), t, r)
+                Operation(CurriedApply(callee, uncurryArgs com (Typed argTypes) args), t, r)
             | _ -> e
         | Operation(Emit(macro, Some info), t, r) ->
-            let info = { info with Args = uncurryArgs info.SignatureArgTypes info.Args }
+            let info = { info with Args = uncurryArgs com info.SignatureArgTypes info.Args }
             Operation(Emit(macro, Some info), t, r)
         // Uncurry also values in setters or new record/union/tuple
         | Value(NewRecord(args, ent, genArgs)) ->
@@ -458,7 +457,7 @@ module private Transforms =
             let args = uncurryConsArgs args uci.UnionCaseFields
             Value(NewUnion(args, uci, ent, genArgs))
         | Set(e, FieldSet(fieldName, fieldType), value, r) ->
-            let value = uncurryArgs (Typed [fieldType])  [value]
+            let value = uncurryArgs com (Typed [fieldType]) [value]
             Set(e, FieldSet(fieldName, fieldType), List.head value, r)
         | e -> e
 

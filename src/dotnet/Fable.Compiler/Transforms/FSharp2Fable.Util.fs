@@ -102,7 +102,9 @@ module Helpers =
     let private getMemberMangledName (com: ICompiler) trimRootModule (memb: FSharpMemberOrFunctionOrValue) =
         if memb.IsExtensionMember then
             let overloadSuffix = OverloadSuffix.getExtensionHash memb
-            memb.CompiledName, Naming.InstanceMemberPart("", overloadSuffix)
+            if trimRootModule
+            then memb.CompiledName, Naming.InstanceMemberPart("", overloadSuffix)
+            else memb.FullName, Naming.InstanceMemberPart("", overloadSuffix)
         else
             match memb.DeclaringEntity with
             | Some ent when ent.IsFSharpModule ->
@@ -298,7 +300,7 @@ module Patterns =
         | _ -> None
 
     let (|ForOf|_|) = function
-        | Let((_, value), // Coertion to seq
+        | Let((_, value), // Coercion to seq
               Let((_, Call(None, meth, _, [], [])),
                 TryFinally(
                   WhileLoop(_,
@@ -312,6 +314,18 @@ module Patterns =
             when meth.CompiledName = "GetEnumerator" ->
             // when meth.FullName = "System.Collections.Generic.IEnumerable.GetEnumerator" ->
             Some(ident, value, body)
+        // optimized "for x in list"
+        | Let((_, UnionCaseGet(value, typ, unionCase, field)),
+                WhileLoop(_, Let((ident, _), body)))
+            when (getFsTypeFullName typ) = Types.list
+                && unionCase.Name = "op_ColonColon" && field.Name = "Tail" ->
+            Some (ident, value, body)
+        // optimized "for _x in list"
+        | Let((ident, UnionCaseGet(value, typ, unionCase, field)),
+                WhileLoop(_, body))
+            when (getFsTypeFullName typ) = Types.list
+                && unionCase.Name = "op_ColonColon" && field.Name = "Tail" ->
+            Some (ident, value, body)
         | _ -> None
 
     let (|PrintFormat|_|) fsExpr =
@@ -352,6 +366,26 @@ module Patterns =
         | NewObject(baseCall, genArgs, baseArgs) -> Some(baseCall, genArgs, baseArgs)
         | Call(None, baseCall, genArgs1, genArgs2, baseArgs) when baseCall.IsConstructor ->
             Some(baseCall, genArgs1 @ genArgs2, baseArgs)
+        | _ -> None
+
+    let (|OptimizedOperator|_|) = function
+        // work-around for optimized string operator (Operators.string)
+        | BasicPatterns.Let((var, BasicPatterns.Call(None, memb, _, membArgTypes, membArgs)),
+                            BasicPatterns.DecisionTree(BasicPatterns.IfThenElse(_, _, BasicPatterns.IfThenElse
+                                                        (BasicPatterns.TypeTest(tt, BasicPatterns.Value vv), _, _)), _))
+                when var.FullName = "matchValue" && memb.FullName = "Microsoft.FSharp.Core.Operators.box"
+                    && vv.FullName = "matchValue" && (getFsTypeFullName tt) = "System.IFormattable" ->
+            Some(memb, None, "ToString", membArgTypes, membArgs)
+        // work-around for optimized hash operator (Operators.hash)
+        | BasicPatterns.Call(Some expr, memb, _, [], [BasicPatterns.Call(None, comp, [], [], [])])
+                when memb.FullName.EndsWith(".GetHashCode") &&
+                     comp.FullName = "Microsoft.FSharp.Core.LanguagePrimitives.GenericEqualityERComparer" ->
+            Some(memb, Some comp, "GenericHash", [expr.Type], [expr])
+        // work-around for optimized equality operator (Operators.(=))
+        | BasicPatterns.Call(Some e1, memb, _, [], [BasicPatterns.Coerce (t2, e2); BasicPatterns.Call(None, comp, [], [], [])])
+                when memb.FullName.EndsWith(".Equals") && t2.HasTypeDefinition && t2.TypeDefinition.CompiledName = "obj" &&
+                     comp.FullName = "Microsoft.FSharp.Core.LanguagePrimitives.GenericEqualityComparer" ->
+            Some(memb, Some comp, "GenericEquality", [e1.Type; e2.Type], [e1; e2])
         | _ -> None
 
     let private numberTypes =
@@ -415,30 +449,17 @@ module TypeHelpers =
         |> Seq.toList
 
     and makeTypeFromDelegate com ctxTypeArgs (genArgs: IList<FSharpType>) (tdef: FSharpEntity) (fullName: string) =
-        if fullName.StartsWith("System.Action") then
-            let argTypes =
-                match Seq.tryHead genArgs with
-                | Some genArg -> [makeType com ctxTypeArgs genArg]
-                | None -> [Fable.Unit]
-            Fable.FunctionType(Fable.DelegateType argTypes, Fable.Unit)
-        elif fullName.StartsWith("System.Func") then
-            let argTypes, returnType =
-                match genArgs.Count with
-                | 0 -> [Fable.Unit], Fable.Unit
-                | 1 -> [Fable.Unit], makeType com ctxTypeArgs genArgs.[0]
-                | c -> Seq.take (c-1) genArgs |> Seq.map (makeType com ctxTypeArgs) |> Seq.toList,
-                        makeType com ctxTypeArgs genArgs.[c-1]
-            Fable.FunctionType(Fable.DelegateType argTypes, returnType)
-        else
-            try
-                let argTypes =
-                    tdef.FSharpDelegateSignature.DelegateArguments
-                    |> Seq.map (snd >> makeType com ctxTypeArgs) |> Seq.toList
-                let returnType =
-                    makeType com ctxTypeArgs tdef.FSharpDelegateSignature.DelegateReturnType
-                Fable.FunctionType(Fable.DelegateType argTypes, returnType)
-            with _ -> // TODO: Log error here?
-                Fable.FunctionType(Fable.DelegateType [Fable.Any], Fable.Any)
+        // tdef.FSharpDelegateSignature doesn't work with types coming f
+        let invokeMember =
+            tdef.MembersFunctionsAndValues
+            |> Seq.find (fun f -> f.DisplayName = "Invoke")
+        let argTypes =
+            invokeMember.CurriedParameterGroups.[0]
+            |> Seq.map (fun p -> makeType com ctxTypeArgs p.Type) |> Seq.toList
+        let returnType =
+            invokeMember.ReturnParameter.Type
+            |> makeType com ctxTypeArgs
+        Fable.FunctionType(Fable.DelegateType argTypes, returnType)
 
     and makeTypeFromDef (com: ICompiler) ctxTypeArgs (genArgs: IList<FSharpType>) (tdef: FSharpEntity) =
         match getEntityFullName tdef, tdef with
@@ -554,7 +575,7 @@ module Identifiers =
         com.AddUsedVarName sanitizedName
         { Name = sanitizedName
           Type = makeType com ctx.GenericArgs fsRef.FullType
-          Kind = Fable.UnespecifiedIdent
+          Kind = Fable.UnspecifiedIdent
           IsMutable = fsRef.IsMutable
           IsCompilerGenerated = fsRef.IsCompilerGenerated
           Range = makeRange fsRef.DeclarationLocation |> Some }
@@ -683,8 +704,8 @@ module Util =
             | AttFullName(Atts.global_, att) ->
                 match att with
                 | AttArguments [:? string as customName] ->
-                    makeTypedIdent typ customName |> Fable.IdentExpr |> Some
-                | _ -> getMemberDisplayName memb |> makeTypedIdent typ |> Fable.IdentExpr |> Some
+                    makeTypedIdentNonMangled typ customName |> Fable.IdentExpr |> Some
+                | _ -> getMemberDisplayName memb |> makeTypedIdentNonMangled typ |> Fable.IdentExpr |> Some
             | AttFullName(Atts.import, AttArguments [(:? string as selector); (:? string as path)]) ->
                 let path =
                     lazy getMemberLocation memb
@@ -705,7 +726,7 @@ module Util =
         let file = Path.normalizePathAndEnsureFsExtension entLoc.FileName
         let entityName = getEntityDeclarationName com ent
         if file = com.CurrentFile
-        then makeIdent entityName |> Fable.IdentExpr
+        then makeIdentExprNonMangled entityName
         else makeInternalImport Fable.Any entityName file
 
     /// First checks if the entity is imported
@@ -724,7 +745,7 @@ module Util =
             // We assume the member belongs to the current file
             | None -> com.CurrentFile
         if file = com.CurrentFile
-        then makeTypedIdent typ memberName |> Fable.IdentExpr
+        then makeTypedIdentNonMangled typ memberName |> Fable.IdentExpr
         else makeInternalImport typ memberName file
 
     let memberRefTyped (com: IFableCompiler) typ (memb: FSharpMemberOrFunctionOrValue) =

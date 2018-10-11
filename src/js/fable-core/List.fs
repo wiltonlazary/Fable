@@ -40,9 +40,6 @@ let compareWith (comparer: 'T -> 'T -> int) (xs: 'T list) (ys: 'T list): int =
                 | res -> res
         loop xs ys
 
-let equalsWith (comparer: 'T -> 'T -> int) (xs: 'T list) (ys: 'T list): bool =
-    compareWith comparer xs ys = 0
-
 let rec foldIndexedAux f i acc = function
     | [] -> acc
     | x::xs -> foldIndexedAux f (i+1) (f i acc x) xs
@@ -332,12 +329,11 @@ let sortByDescending (projection:'a->'b) (xs : 'a list) ([<Inject>] comparer: IC
 let sortWith (comparer: 'T -> 'T -> int) (xs : 'T list): 'T list =
     Array.sortInPlaceWith comparer (List.toArray xs) |> ofArray
 
-// TODO!!!: Pass add function for non-number types
-let sum (xs: float list) : float =
-    fold (+) 0. xs
+let sum (xs: 'T list) ([<Inject>] adder: IGenericAdder<'T>): 'T =
+    fold (fun acc x -> adder.Add(acc, x)) (adder.GetZero()) xs
 
-let sumBy (f:'a -> float) (xs: 'a list) : float =
-    fold (fun acc x -> acc + f x) 0. xs
+let sumBy (f: 'T -> 'T2) (xs: 'T list) ([<Inject>] adder: IGenericAdder<'T2>): 'T2 =
+    fold (fun acc x -> adder.Add(acc, f x)) (adder.GetZero()) xs
 
 let maxBy (projection:'a->'b) (xs:'a list) ([<Inject>] comparer: IComparer<'b>): 'a =
     reduce (fun x y -> if comparer.Compare(projection y, projection x) > 0 then y else x) xs
@@ -351,13 +347,13 @@ let minBy (projection:'a->'b) (xs:'a list) ([<Inject>] comparer: IComparer<'b>):
 let min (xs:'a list) ([<Inject>] comparer: IComparer<'a>): 'a =
     reduce (fun x y -> if comparer.Compare(y, x) > 0 then x else y) xs
 
-let average (zs: float list) : float =
-    let total = sum zs
-    total / float (length zs)
+let average (xs: 'T list) ([<Inject>] averager: IGenericAverager<'T>): 'T =
+    let total = fold (fun acc x -> averager.Add(acc, x)) (averager.GetZero()) xs
+    averager.DivideByInt(total, length xs)
 
-let averageBy (g: 'a -> float ) (zs: 'a list) : float =
-    let total = sumBy g zs
-    total / float (length zs)
+let averageBy (f: 'T -> 'T2) (xs: 'T list) ([<Inject>] averager: IGenericAverager<'T2>): 'T2 =
+    let total = fold (fun acc x -> averager.Add(acc, f x)) (averager.GetZero()) xs
+    averager.DivideByInt(total, length xs)
 
 let permute f xs =
     xs

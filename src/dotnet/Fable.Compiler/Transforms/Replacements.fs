@@ -46,8 +46,8 @@ type Helper =
                              ?argTypes: Type list, ?memb: string, ?isConstructor: bool, ?loc: SourceLocation) =
         let funcExpr =
             match memb with
-            | Some m -> get None Any (makeIdentExpr ident) m
-            | None -> makeIdentExpr ident
+            | Some m -> get None Any (makeIdentExprNonMangled ident) m
+            | None -> makeIdentExprNonMangled ident
         let op =
             match isConstructor with
             | Some true -> ConstructorCall funcExpr
@@ -57,7 +57,7 @@ type Helper =
         Operation(Call(op, info), returnType, loc)
 
     static member GlobalIdent(ident: string, memb: string, typ: Type, ?loc: SourceLocation) =
-        get loc typ (makeIdentExpr ident) memb
+        get loc typ (makeIdentExprNonMangled ident) memb
 
 module Helpers =
     let inline makeType com t =
@@ -95,7 +95,7 @@ module Helpers =
         Operation(BinaryOperation(BinaryEqual, expr, Value(Null Any)), Boolean, None)
 
     let error msg =
-        Helper.ConstructorCall(makeIdentExpr "Error", Any, [msg])
+        Helper.ConstructorCall(makeIdentExprNonMangled "Error", Any, [msg])
 
     let s txt = Value(StringConstant txt)
 
@@ -182,20 +182,6 @@ let (|ListLiteral|_|) e =
     | Value(NewList(None, t)) -> Some([], t)
     | Value(NewList(Some(head, tail), t)) -> untail t [head] tail
     | _ -> None
-
-let (|ArrayOrList|_|) = function
-    | Array t -> Some("Array", t)
-    | List t -> Some("List", t)
-    | _ -> None
-
-/// Try to uncurry lambdas at compile time in dynamic assignments
-let (|MaybeLambdaUncurriedAtCompileTime|) = function
-    | LambdaUncurriedAtCompileTime None lambda -> lambda
-    | e -> e
-
-let (|MaybeAsInterface|) = function
-    | DelayedResolution(AsInterface(e,_,_),_,_) -> e
-    | e -> e
 
 let (|IDictionary|IEqualityComparer|Other|) = function
     | DeclaredType(ent,_) ->
@@ -347,10 +333,10 @@ let toFloat com (ctx: Context) r targetType (args: Expr list) =
                     | Number Decimal -> "toDecimal"
                     | _ -> failwith "Unexpected BigInt conversion"
         Helper.CoreCall("BigInt", meth, Number Float64, args)
-    | Number _ | Char | EnumType(NumberEnumType,_) -> args.Head
+    | Number _ | Char | EnumType(NumberEnumType,_) -> TypeCast(args.Head, targetType)
     | _ ->
         addWarning com ctx.InlinePath r "Cannot make conversion at compile time because source type is unknown"
-        args.Head
+        TypeCast(args.Head, targetType)
 
 // Apparently ~~ is faster than Math.floor (see https://coderwall.com/p/9b6ksa/is-faster-than-math-floor)
 let fastIntFloor expr =
@@ -406,10 +392,9 @@ let toInt com (ctx: Context) r (round: bool) targetType (args: Expr list) =
         | Number UInt8 -> emitJs None targetType args "$0 & 0xFF"
         | Number UInt16 -> emitJs None targetType args "$0 & 0xFFFF"
         | Number UInt32 -> emitJs None targetType args "$0 >>> 0"
-        // TODO: Use Cast(args.Head, targetType) for these cases (more below)?
-        | Number Float32 -> args.Head
-        | Number Float64 -> args.Head
-        | Number Decimal -> args.Head
+        | Number Float32 -> TypeCast(args.Head, targetType)
+        | Number Float64 -> TypeCast(args.Head, targetType)
+        | Number Decimal -> TypeCast(args.Head, targetType)
         | _ -> failwithf "Unexpected non-number type %A" typeTo
     let castBigIntMethod typeTo =
         match typeTo with
@@ -427,7 +412,7 @@ let toInt com (ctx: Context) r (round: bool) targetType (args: Expr list) =
         | Number Decimal -> "toDecimal"
         | _ -> failwithf "Unexpected non-number type %A" typeTo
     match sourceType with
-    | EnumType(NumberEnumType,_) -> args.Head
+    | EnumType(NumberEnumType,_) -> TypeCast(args.Head, targetType)
     | Char -> Helper.InstanceCall(args.Head, "charCodeAt", targetType, [makeIntConst 0])
     | String ->
         match targetType with
@@ -454,17 +439,16 @@ let toInt com (ctx: Context) r (round: bool) targetType (args: Expr list) =
             |> emitCast typeTo
         | Builtin (BclUInt64|BclInt64 as kind) ->
             emitLong (kind = BclUInt64) [args.Head]
-        | Number _ -> args.Head
-        | _ -> args.Head
+        | _ -> TypeCast(args.Head, targetType)
     | _ ->
         addWarning com ctx.InlinePath r "Cannot make conversion at compile time because source type is unknown"
-        args.Head
+        TypeCast(args.Head, targetType)
 
 let arrayCons (com: ICompiler) genArg =
     match genArg with
     | Number numberKind when com.Options.typedArrays ->
-        getTypedArrayName com numberKind |> makeIdentExpr
-    | _ -> makeIdentExpr "Array"
+        getTypedArrayName com numberKind |> makeIdentExprNonMangled
+    | _ -> makeIdentExprNonMangled "Array"
 
 // TODO: Should we pass the empty list representation here?
 let toList returnType expr =
@@ -499,27 +483,26 @@ let stringToCharArray t e =
 let enumerator2iterator (e: Expr) =
     Helper.CoreCall("Seq", "toIterator", e.Type, [e])
 
-let toSeq r t (e: Expr) =
+let toSeq t (e: Expr) =
     match e.Type with
-    // Delay resolution for a chance to optimize a list into an array
-    | List _ ->
-        let kind = AsInterface(e, id, Types.ienumerableGeneric)
-        DelayedResolution(kind, t, r)
     // Convert to array to get 16-bit code units, see #1279
     | String -> stringToCharArray t e
-    | _ -> e
+    | _ -> TypeCast(e, t)
 
 let iterate r ident body (xs: Expr) =
     let f = Function(Delegate [ident], body, None)
-    Helper.CoreCall("Seq", "iterate", Unit, [f; toSeq r xs.Type xs], ?loc=r)
+    Helper.CoreCall("Seq", "iterate", Unit, [f; toSeq xs.Type xs], ?loc=r)
+
+let (|ListSingleton|) x = [x]
+
+let (|CustomOp|_|) com ctx opName argTypes sourceTypes =
+    let tryFindMember com (ctx: Context) (ent: FSharpEntity) opName argTypes =
+        FSharp2Fable.TypeHelpers.tryFindMember com ent ctx.GenericArgs opName false argTypes
+    sourceTypes |> List.tryPick (function
+        | DeclaredType(ent,_) -> tryFindMember com ctx ent opName argTypes
+        | _ -> None)
 
 let applyOp (com: ICompiler) (ctx: Context) r t opName (args: Expr list) argTypes genArgs =
-    let (|CustomOp|_|) com ctx opName argTypes =
-        let tryFindMember com (ctx: Context) (ent: FSharpEntity) opName argTypes =
-            FSharp2Fable.TypeHelpers.tryFindMember com ent ctx.GenericArgs opName false argTypes
-        argTypes |> List.tryPick (function
-            | DeclaredType(ent,_) -> tryFindMember com ctx ent opName argTypes
-            | _ -> None)
     let unOp operator operand =
         Operation(UnaryOperation(operator, operand), t, r)
     let binOp op left right =
@@ -536,7 +519,7 @@ let applyOp (com: ICompiler) (ctx: Context) r t opName (args: Expr list) argType
         | Operators.addition, [left; right] -> binOp BinaryPlus left right
         | Operators.subtraction, [left; right] -> binOp BinaryMinus left right
         | Operators.multiply, [left; right] -> binOp BinaryMultiply left right
-        | Operators.division, [left; right] ->
+        | (Operators.division|Operators.divideByInt), [left; right] ->
             match argTypes with
             // Floor result of integer divisions (see #172)
             | Number Integer::_ -> binOp BinaryDivide left right |> fastIntFloor
@@ -554,7 +537,8 @@ let applyOp (com: ICompiler) (ctx: Context) r t opName (args: Expr list) argType
         | Operators.booleanOr, [left; right] -> logicOp LogicalOr left right
         | Operators.logicalNot, [operand] -> unOp UnaryNotBitwise operand |> truncateUnsigned
         | Operators.unaryNegation, [operand] -> unOp UnaryMinus operand
-        | _ -> "Unknown operator: " + opName |> addErrorAndReturnNull com ctx.InlinePath r
+        | _ -> sprintf "Operator %s not found in %A" opName argTypes
+               |> addErrorAndReturnNull com ctx.InlinePath r
     let argTypes = resolveArgTypes argTypes genArgs
     match argTypes with
     | Builtin(BclInt64|BclUInt64|BclBigInt|BclDateTime|BclDateTimeOffset as bt)::_ ->
@@ -571,7 +555,7 @@ let applyOp (com: ICompiler) (ctx: Context) r t opName (args: Expr list) argType
     //     Helper.CoreCall("Map", mangledName, t, args, argTypes, ?loc=r)
     | Builtin BclTimeSpan::_ ->
         nativeOp opName argTypes args
-    | CustomOp com ctx opName m ->
+    | CustomOp com ctx opName argTypes m ->
         let genArgs = genArgs |> Seq.map snd
         FSharp2Fable.Util.makeCallFrom com ctx r t false genArgs None args m
     | _ -> nativeOp opName argTypes args
@@ -607,6 +591,12 @@ let identityHash r (arg: Expr) =
 let structuralHash r (arg: Expr) =
     Helper.CoreCall("Util", "structuralHash", Number Int32, [arg], ?loc=r)
 
+let makeFunctionsObject (namesAndFunctions: (string * Expr) list) =
+    let members =
+        namesAndFunctions |> List.map (fun (name, fn) ->
+            Fable.ObjectMember(makeStrConst name, fn, Fable.ObjectValue))
+    ObjectExpr(members, Fable.Any, None)
+
 let rec equals (com: ICompiler) r equal (left: Expr) (right: Expr) =
     let is equal expr =
         if equal
@@ -623,15 +613,18 @@ let rec equals (com: ICompiler) r equal (left: Expr) (right: Expr) =
         Helper.InstanceCall(left, "Equals", Boolean, [right]) |> is equal
     | Builtin(BclInt64|BclUInt64|BclBigInt as bt) ->
         Helper.CoreCall(coreModFor bt, "equals", Boolean, [left; right], ?loc=r) |> is equal
-    | ArrayOrList(modName, t) ->
+    | Array t ->
         let f = makeComparerFunction com t
-        Helper.CoreCall(modName, "equalsWith", Boolean, [f; left; right], ?loc=r) |> is equal
+        Helper.CoreCall("Array", "equalsWith", Boolean, [f; left; right], ?loc=r) |> is equal
+    | List _ ->
+        Helper.CoreCall("Util", "equals", Boolean, [left; right], ?loc=r) |> is equal
     | MetaType ->
         Helper.CoreCall("Reflection", "equals", Boolean, [left; right], ?loc=r) |> is equal
     | Tuple _ ->
         Helper.CoreCall("Util", "equalArrays", Boolean, [left; right], ?loc=r) |> is equal
-    | DeclaredType(ent,_) when hasBaseImplementingBasicMethods ent ->
-        Helper.InstanceCall(left, "Equals", Boolean, [right]) |> is equal
+    // unsafe optimization, left can sometimes be null
+    // | DeclaredType(ent,_) when hasBaseImplementingBasicMethods ent ->
+    //     Helper.InstanceCall(left, "Equals", Boolean, [right]) |> is equal
     | _ ->
         Helper.CoreCall("Util", "equals", Boolean, [left; right], ?loc=r) |> is equal
 
@@ -645,9 +638,11 @@ and compare (com: ICompiler) r (left: Expr) (right: Expr) =
         Helper.CoreCall("Date", "compare", Number Int32, [left; right], ?loc=r)
     | Builtin(BclInt64|BclUInt64|BclBigInt as bt) ->
         Helper.CoreCall(coreModFor bt, "compare", Number Int32, [left; right], ?loc=r)
-    | ArrayOrList(modName, t) ->
+    | Array t ->
         let f = makeComparerFunction com t
-        Helper.CoreCall(modName, "compareWith", Number Int32, [f; left; right], ?loc=r)
+        Helper.CoreCall("Array", "compareWith", Number Int32, [f; left; right], ?loc=r)
+    | List _ ->
+        Helper.CoreCall("Util", "compare", Number Int32, [left; right], ?loc=r)
     | MetaType ->
         Helper.CoreCall("Reflection", "compare", Number Int32, [left; right], ?loc=r)
     | Tuple _ ->
@@ -656,7 +651,8 @@ and compare (com: ICompiler) r (left: Expr) (right: Expr) =
         Helper.InstanceCall(left, "CompareTo", Number Int32, [right], ?loc=r)
     | DeclaredType(ent,_) when FSharp2Fable.Util.hasInterface Types.icomparable ent ->
         Helper.InstanceCall(left, "CompareTo", Number Int32, [right], ?loc=r)
-    | _ -> Helper.CoreCall("Util", "compare", Number Int32, [left; right], ?loc=r)
+    | _ ->
+        Helper.CoreCall("Util", "compare", Number Int32, [left; right], ?loc=r)
 
 /// Wraps comparison with the binary operator, like `comparison < 0`
 and compareIf (com: ICompiler) r (left: Expr) (right: Expr) op =
@@ -669,20 +665,18 @@ and compareIf (com: ICompiler) r (left: Expr) (right: Expr) op =
         makeEqOp r comparison (makeIntConst 0) op
 
 and makeComparerFunction (com: ICompiler) typArg =
-    let x = makeTypedIdent typArg "x"
-    let y = makeTypedIdent typArg "y"
+    let x = makeTypedIdentUnique com typArg "x"
+    let y = makeTypedIdentUnique com typArg "y"
     let body = compare com None (IdentExpr x) (IdentExpr y)
     Function(Delegate [x; y], body, None)
 
 and makeComparer (com: ICompiler) typArg =
-    let f = makeComparerFunction com typArg
-    let m = ObjectMember(makeStrConst "Compare", f, ObjectValue)
-    // TODO: Use proper IComparer<'T> type instead of Any
-    ObjectExpr([m], Any, None)
+    let fn = makeComparerFunction com typArg
+    makeFunctionsObject ["Compare", fn]
 
 let makeEqualityComparer (com: ICompiler) typArg =
-    let x = makeTypedIdent typArg "x"
-    let y = makeTypedIdent typArg "y"
+    let x = makeTypedIdentUnique com typArg "x"
+    let y = makeTypedIdentUnique com typArg "y"
     let body = equals com None true (IdentExpr x) (IdentExpr y)
     let f = Function(Delegate [x; y], body, None)
     // TODO: Use proper IEqualityComparer<'T> type instead of Any
@@ -722,7 +716,7 @@ let makeHashSet (com: ICompiler) r t sourceSeq =
         makeComparer com key |> makeHashSetWithComparer r t sourceSeq
     | _ -> Helper.GlobalCall("Set", t, [sourceSeq], isConstructor=true, ?loc=r)
 
-let getZero (com: ICompiler) (t: Type) =
+let getZero (com: ICompiler) ctx (t: Type) =
     match t with
     | Char | String -> makeStrConst ""
     | Builtin BclTimeSpan -> makeIntConst 0
@@ -731,15 +725,41 @@ let getZero (com: ICompiler) (t: Type) =
     | Builtin (FSharpSet genArg) as t -> makeSet com None t "Empty" [] genArg
     | Builtin (BclInt64|BclUInt64) as t -> Helper.CoreCall("Long", "fromInt", t, [makeIntConst 0])
     | Builtin BclBigInt as t -> Helper.CoreCall("BigInt", "fromInt32", t, [makeIntConst 0])
-    // TODO: Calls to custom Zero implementation
+    | ListSingleton(CustomOp com ctx "get_Zero" [] m) ->
+        FSharp2Fable.Util.makeCallFrom com ctx None t false [] None [] m
     | _ -> makeIntConst 0
 
-let getOne (com: ICompiler) (t: Type) =
+let getOne (com: ICompiler) ctx (t: Type) =
     match t with
     | Builtin (BclInt64|BclUInt64) as t -> Helper.CoreCall("Long", "fromInt", t, [makeIntConst 1])
     | Builtin BclBigInt as t -> Helper.CoreCall("BigInt", "fromInt32", t, [makeIntConst 1])
-    // TODO: Calls to custom One implementation
+    | ListSingleton(CustomOp com ctx "get_One" [] m) ->
+        FSharp2Fable.Util.makeCallFrom com ctx None t false [] None [] m
     | _ -> makeIntConst 1
+
+let makeAddFunction (com: ICompiler) ctx t =
+    let x = makeTypedIdentUnique com t "x"
+    let y = makeTypedIdentUnique com t "y"
+    let body = applyOp com ctx None t Operators.addition [IdentExpr x; IdentExpr y] [t; t] []
+    Function(Delegate [x; y], body, None)
+
+let makeGenericAdder (com: ICompiler) ctx t =
+    makeFunctionsObject [
+        "GetZero", getZero com ctx t |> makeDelegate []
+        "Add", makeAddFunction com ctx t
+    ]
+
+let makeGenericAverager (com: ICompiler) ctx t =
+    let divideFn =
+        let x = makeTypedIdentUnique com t "x"
+        let i = makeTypedIdentUnique com (Number Int32) "i"
+        let body = applyOp com ctx None t Operators.divideByInt [IdentExpr x; IdentExpr i] [t; Number Int32] []
+        Function(Delegate [x; i], body, None)
+    makeFunctionsObject [
+        "GetZero", getZero com ctx t |> makeDelegate []
+        "Add", makeAddFunction com ctx t
+        "DivideByInt", divideFn
+    ]
 
 let makePojoFromLambda arg =
     let rec flattenSequential = function
@@ -777,11 +797,11 @@ let makePojo (com: Fable.ICompiler) r caseRule keyValueList =
     | Value(Enum(NumberEnum(Value(NumberConstant(rule, _))), _)) ->
         let caseRule = enum(int rule)
         match keyValueList with
-        | MaybeAsInterface(Value(NewArray(ArrayValues ms, _)) | ListLiteral(ms, _)) ->
+        | MaybeCasted(Value(NewArray(ArrayValues ms, _)) | ListLiteral(ms, _)) ->
             (ms, Some []) ||> List.foldBack (fun m acc ->
                 match acc, m with
                 // Try to get the member key and value at compile time for unions and tuples
-                | Some acc, MaybeAsInterface(Value(NewUnion(values, uci, _, _))) ->
+                | Some acc, MaybeCasted(Value(NewUnion(values, uci, _, _))) ->
                     // Union cases with EraseAttribute are used for `Custom`-like cases
                     match FSharp2Fable.Helpers.tryFindAtt Atts.erase uci.Attributes with
                     | Some _ ->
@@ -814,6 +834,10 @@ let injectArg com (ctx: Context) r moduleName methName (genArgs: (string * Type)
             makeEqualityComparer com genArg |> Some
         | (Types.arrayCons, GenericArg genArgs (_,genArg)) ->
             arrayCons com genArg |> Some
+        | (Types.adder, GenericArg genArgs (_,genArg)) ->
+            makeGenericAdder com ctx genArg |> Some
+        | (Types.averager, GenericArg genArgs (_,genArg)) ->
+            makeGenericAverager com ctx genArg |> Some
         | (_, genArgIndex) ->
             sprintf "Cannot inject arg to %s.%s (genArgs %A - expected index %i)"
                 moduleName methName (List.map fst genArgs) genArgIndex
@@ -865,7 +889,7 @@ let fableCoreLib (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Exp
     | "jsOptions", [arg] ->
         makePojoFromLambda arg |> Some
     | "jsThis", _ ->
-        makeTypedIdent t "this" |> IdentExpr |> Some
+        makeTypedIdentNonMangled t "this" |> IdentExpr |> Some
     | "jsConstructor", _ ->
         match (genArg com ctx r 0 i.GenericArgs) with
         | DeclaredType(ent, _) when ent.IsClass -> FSharp2Fable.Util.entityRefMaybeImported com ent |> Some
@@ -993,7 +1017,7 @@ let operators (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr o
             match t with
             | FunctionType(LambdaType argType, retType) -> argType, retType
             | _ -> Any, Any
-        let tempVar = com.GetUniqueVar("arg") |> makeTypedIdent argType
+        let tempVar = makeTypedIdentUnique com argType "arg"
         let tempVarExpr =
             match argType with
             // Erase unit references, because the arg may be erased
@@ -1014,11 +1038,11 @@ let operators (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr o
         Helper.CoreCall("Option", "defaultArg", t, args, i.SignatureArgTypes, ?loc=r) |> Some
     | "DefaultAsyncBuilder", _ ->
         makeCoreRef t "singleton" "AsyncBuilder" |> Some
-    // Erased operators. TODO: Use Cast?
+    // Erased operators.
     // KeyValuePair is already compiled as a tuple
-    | ("KeyValuePattern"|"Identity"|"Box"|"Unbox"|"ToEnum"), _ -> List.tryHead args
+    | ("KeyValuePattern"|"Identity"|"Box"|"Unbox"|"ToEnum"), [arg] -> TypeCast(arg, t) |> Some
     // Cast to unit to make sure nothing is returned when wrapped in a lambda, see #1360
-    | "Ignore", [arg]  -> DelayedResolution(AsUnit arg, t, r) |> Some
+    | "Ignore", [arg]  -> TypeCast(arg, Unit) |> Some
     // TODO: Number and String conversions
     | ("ToSByte"|"ToByte"|"ToInt8"|"ToUInt8"|"ToInt16"|"ToUInt16"|"ToInt"|"ToUInt"|"ToInt32"|"ToUInt32"|"ToInt64"|"ToUInt64"), _ ->
         toInt com ctx r false t args |> Some
@@ -1026,7 +1050,7 @@ let operators (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr o
         toFloat com ctx r t args |> Some
     | "ToChar", _ -> toChar args.Head |> Some
     | "ToString", _ -> toString com ctx r args |> Some
-    | "CreateSequence", [xs] -> toSeq r t xs |> Some
+    | "CreateSequence", [xs] -> toSeq t xs |> Some
     | "CreateDictionary", [arg] -> makeDictionary com r t arg |> Some
     | "CreateSet", _ -> (genArg com ctx r 0 i.GenericArgs) |> makeSet com r t "OfSeq" args |> Some
     // Ranges
@@ -1034,13 +1058,13 @@ let operators (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr o
         let genArg = genArg com ctx r 0 i.GenericArgs
         let addStep args =
             match args with
-            | [first; last] -> [first; getOne com genArg; last]
+            | [first; last] -> [first; getOne com ctx genArg; last]
             | _ -> args
         let meth, args =
             match genArg with
             // TODO: BigInt?
             | Char -> "rangeChar", args
-            | Builtin BclInt64 -> "rangeLong", addStep args
+            | Builtin BclInt64 -> "rangeLong", (addStep args) @ [makeBoolConst false]
             | Builtin BclUInt64 -> "rangeLong", (addStep args) @ [makeBoolConst true]
             | _ -> "rangeNumber", addStep args
         Helper.CoreCall("Seq", meth, t, args, i.SignatureArgTypes, ?loc=r) |> Some
@@ -1218,7 +1242,7 @@ let strings (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr opt
             addWarning com ctx.InlinePath r "String.Contains: second argument is ignored"
         let left = Helper.InstanceCall(c, "indexOf", Number Int32, [arg])
         makeEqOp r left (makeIntConst 0) BinaryGreaterOrEqual |> Some
-    | ("StartsWith" | "StartsWithOrdinal"), Some c, [_str] ->
+    | "StartsWith", Some c, [_str] ->
         let left = Helper.InstanceCall(c, "indexOf", Number Int32, args)
         makeEqOp r left (makeIntConst 0) BinaryEqualStrict |> Some
     | "StartsWith", Some c, [_str; _comp] ->
@@ -1300,7 +1324,7 @@ let stringModule (com: ICompiler) (ctx: Context) r t (i: CallInfo) (_: Expr opti
         Helper.CoreCall("String", Naming.lowerFirst meth, t, args, i.SignatureArgTypes, ?loc=r) |> Some
 
 let getEnumerator r t expr =
-    Helper.CoreCall("Seq", "getEnumerator", t, [toSeq r Any expr], ?loc=r)
+    Helper.CoreCall("Seq", "getEnumerator", t, [toSeq Any expr], ?loc=r)
 
 let seqs (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
     let sort r returnType descending projection args genArg =
@@ -1311,8 +1335,8 @@ let seqs (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Exp
                     let info = argInfo None [IdentExpr ident] NoUncurrying
                     Operation(Call(StaticCall projection, info), genArg, None)
                 | None -> IdentExpr ident
-            let x = makeTypedIdent genArg "x"
-            let y = makeTypedIdent genArg "y"
+            let x = makeTypedIdentUnique com genArg "x"
+            let y = makeTypedIdentUnique com genArg "y"
             let comparison =
                 let comparison = compare com None (identExpr x) (identExpr y)
                 if descending
@@ -1324,7 +1348,7 @@ let seqs (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Exp
     match i.CompiledName, args with
     | "Cast", [arg] -> Some arg // Erase
     | ("Cache"|"ToArray"), [arg] -> toArray com t arg |> Some
-    | "OfList", [arg] -> toSeq r t arg |> Some
+    | "OfList", [arg] -> toSeq t arg |> Some
     | "ToList", _ -> Helper.CoreCall("List", "ofSeq", t, args, i.SignatureArgTypes, ?loc=r) |> Some
     | "ChunkBySize" | "Permute" as meth, [arg1; arg2] ->
         let arg2 = toArray com (Array Any) arg2
@@ -1500,7 +1524,7 @@ let listModule (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (_: Exp
         NewList(Some(x, Value(NewList(None, t))), (genArg com ctx r 0 i.GenericArgs)) |> Value |> Some
     // Use a cast to give it better chances of optimization (e.g. converting list
     // literals to arrays) after the beta reduction pass
-    | "ToSeq", [x] -> toSeq r t x |> Some
+    | "ToSeq", [x] -> toSeq t x |> Some
     | "ToArray", [x] -> listToArray com r t x |> Some
     | meth, _ ->
         let meth = Naming.lowerFirst meth
@@ -1553,7 +1577,7 @@ let options (_: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Ex
 
 let optionModule (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (_: Expr option) (args: Expr list) =
     let toArray r t arg =
-        let ident = makeIdent (com.GetUniqueVar())
+        let ident = makeIdentUnique com "x"
         let f =
             [IdentExpr ident]
             |> makeArray Any
@@ -1563,7 +1587,7 @@ let optionModule (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (_: E
     match i.CompiledName, args with
     | "None", _ -> NewOption(None, t) |> Value |> Some
     | "GetValue", [c] -> Get(c, OptionValue, t, r) |> Some
-    | ("OfObj" | "OfNullable"), [c] -> Some c // TODO: Call function to keep type?
+    | ("OfObj" | "OfNullable"), [c] -> TypeCast(c, t) |> Some
     | ("ToObj" | "ToNullable" | "Flatten"), [c] ->
         Helper.CoreCall("Option", "value", t, [c; makeBoolConst true], ?loc=r) |> Some
     | "IsSome", [c] -> Test(c, OptionTest true, r) |> Some
@@ -1679,9 +1703,16 @@ let decimals (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg:
     | "op_GreaterThanOrEqual", [left; right] -> compareIf com r left right BinaryGreaterOrEqual |> Some
     | "op_UnaryNegation", [arg] ->
         applyOp com ctx r t i.CompiledName args i.SignatureArgTypes i.GenericArgs |> Some
+    | "op_Explicit", [arg] ->
+        match t with
+        | Number Integer | Builtin(BclInt64|BclUInt64) ->
+            toInt com ctx r false t args |> Some
+        | Number Float ->
+            toFloat com ctx r t args |> Some
+        | _ -> None
     | _,_ -> None
 
-let bigints (_: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
+let bigints (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
     match thisArg, i.CompiledName with
     | None, ".ctor" ->
         match i.SignatureArgTypes with
@@ -1689,6 +1720,13 @@ let bigints (_: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (thisArg: Ex
             Helper.CoreCall("BigInt", "fromInt64", t, args, i.SignatureArgTypes, ?loc=r) |> Some
         | _ ->
             Helper.CoreCall("BigInt", "fromInt32", t, args, i.SignatureArgTypes, ?loc=r) |> Some
+    | None, "op_Explicit" ->
+        match t with
+        | Number Integer | Builtin(BclInt64|BclUInt64) ->
+            toInt com ctx r false t args |> Some
+        | Number Float ->
+            toFloat com ctx r t args |> Some
+        | _ -> None
     | None, meth ->
         Helper.CoreCall("BigInt", Naming.lowerFirst meth, t, args, i.SignatureArgTypes, ?loc=r) |> Some
     | Some callee, meth ->
@@ -1704,8 +1742,8 @@ let errorStrings = function
 
 let languagePrimitives (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
     match i.CompiledName, args with
-    | "GenericZero", _ -> getZero com t |> Some
-    | "GenericOne", _ -> getOne com t |> Some
+    | "GenericZero", _ -> getZero com ctx t |> Some
+    | "GenericOne", _ -> getOne com ctx t |> Some
     | "EnumOfValue", [arg] ->
         match t with
         | EnumType(_, fullName) -> Enum(NumberEnum arg, fullName) |> Value |> Some
@@ -1795,9 +1833,11 @@ let intrinsicFunctions (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisAr
     | ("RangeSByte" | "RangeByte"
     | "RangeInt16"  | "RangeUInt16"
     | "RangeInt32"  | "RangeUInt32"
-    | "RangeInt64"  | "RangeUInt64"
     | "RangeSingle" | "RangeDouble"), None, args ->
-        Helper.CoreCall("Seq", "rangeStep", t, args, i.SignatureArgTypes, ?loc=r) |> Some
+        Helper.CoreCall("Seq", "rangeNumber", t, args, i.SignatureArgTypes, ?loc=r) |> Some
+    | ("RangeInt64" | "RangeUInt64"), None, args ->
+        let isUnsigned = makeBoolConst (i.CompiledName = "RangeUInt64")
+        Helper.CoreCall("Seq", "rangeLong", t, args @ [isUnsigned] , i.SignatureArgTypes, ?loc=r) |> Some
     | _ -> None
 
 let funcs (_: ICompiler) (ctx: Context) r t (i: CallInfo) thisArg args =
@@ -1886,7 +1926,7 @@ let hashSets (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr op
 
 let exceptions (_: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
     match i.CompiledName, thisArg with
-    | ".ctor", _ -> Helper.ConstructorCall(makeIdentExpr "Error", t, args, ?loc=r) |> Some
+    | ".ctor", _ -> Helper.ConstructorCall(makeIdentExprNonMangled "Error", t, args, ?loc=r) |> Some
     | "get_Message", Some e -> get r t e "message" |> Some
     | "get_StackTrace", Some e -> get r t e "stack" |> Some
     | _ -> None
@@ -1899,7 +1939,7 @@ let objects (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr opt
     | "ToString", Some arg, _ ->
         toString com ctx r [arg] |> Some
     | "ReferenceEquals", _, [left; right] ->
-        makeBinOp r Boolean left right BinaryEqualStrict |> Some
+        makeEqOp r left right BinaryEqualStrict |> Some
     | "Equals", Some arg1, [arg2]
     | "Equals", None, [arg1; arg2] ->
         Helper.CoreCall("Util", "equals", t, [arg1; arg2], ?loc=r) |> Some
@@ -1983,7 +2023,7 @@ let convert (com: ICompiler) (ctx: Context) r t (i: CallInfo) (_: Expr option) (
 
 let console (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
     match i.CompiledName with
-    | "Out" -> None
+    | "get_Out" -> objExpr t [] |> Some // empty object
     | "Write" ->
         addWarning com ctx.InlinePath r "Write will behave as WriteLine"
         log com r t i thisArg args |> Some
@@ -2073,8 +2113,8 @@ let timeSpans (_: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr opt
     // let callee = match i.callee with Some c -> c | None -> i.args.Head
     match i.CompiledName with
     | ".ctor" -> Helper.CoreCall("TimeSpan", "create", t, args, i.SignatureArgTypes, ?loc=r) |> Some
-    | "FromMilliseconds" -> args.Head |> Some
-    | "get_TotalMilliseconds" -> thisArg.Value |> Some
+    | "FromMilliseconds" -> TypeCast(args.Head, t) |> Some
+    | "get_TotalMilliseconds" -> TypeCast(thisArg.Value, t) |> Some
     | meth ->
         let meth = Naming.removeGetSetPrefix meth |> Naming.lowerFirst
         Helper.CoreCall("TimeSpan", meth, t, args, i.SignatureArgTypes, ?thisArg=thisArg, ?loc=r) |> Some
@@ -2482,7 +2522,9 @@ let private replacedModules =
     "Microsoft.FSharp.Control.FSharpMailboxProcessor`1", mailbox
     "Microsoft.FSharp.Control.FSharpAsyncReplyChannel`1", mailbox
     "Microsoft.FSharp.Control.FSharpAsyncBuilder", asyncBuilder
+    "Microsoft.FSharp.Control.AsyncActivation`1", asyncBuilder
     "Microsoft.FSharp.Control.FSharpAsync", asyncs
+    "Microsoft.FSharp.Control.AsyncPrimitives", asyncs
     Types.guid, guids
     "System.Uri", uris
     "System.Lazy`1", laziness
@@ -2492,6 +2534,8 @@ let private replacedModules =
     "Microsoft.FSharp.Control.FSharpEvent`1", events
     "Microsoft.FSharp.Control.EventModule", events
     "Microsoft.FSharp.Control.ObservableModule", observable
+    Types.type_, types
+    "System.Reflection.TypeInfo", types
 ]
 
 let tryCall (com: ICompiler) (ctx: Context) r t (info: CallInfo) (thisArg: Expr option) (args: Expr list) =
@@ -2508,7 +2552,6 @@ let tryCall (com: ICompiler) (ctx: Context) r t (info: CallInfo) (thisArg: Expr 
     | Naming.StartsWith "System.Func" _
     | Naming.StartsWith "Microsoft.FSharp.Core.FSharpFunc" _
     | Naming.StartsWith "Microsoft.FSharp.Core.OptimizedClosures.FSharpFunc" _ -> funcs com ctx r t info thisArg args
-    | Types.type_ -> types com ctx r t info thisArg args
     | "Microsoft.FSharp.Reflection.FSharpType" -> fsharpType info.CompiledName r t info args
     | "Microsoft.FSharp.Reflection.FSharpValue" -> fsharpValue info.CompiledName r t info args
     | "Microsoft.FSharp.Reflection.FSharpReflectionExtensions" ->
@@ -2565,7 +2608,7 @@ let tryBaseConstructor com (ent: FSharpEntity) (memb: FSharpMemberOrFunctionOrVa
             | [Number _; IEqualityComparer], [_; eqComp] ->
                 [makeArray Any []; makeComparerFromEqualityComparer eqComp]
             | _ -> failwith "Unexpected dictionary constructor"
-        Some(makeCoreRef Any "Dictionary" "Types", args)
+        Some(makeCoreRef Any "Dictionary" "DictTypes", args)
     | Types.hashset ->
         let args =
             match FSharp2Fable.TypeHelpers.getArgTypes com memb, args with
@@ -2578,5 +2621,5 @@ let tryBaseConstructor com (ent: FSharpEntity) (memb: FSharpMemberOrFunctionOrVa
             | [IEqualityComparer], [eqComp] ->
                 [makeArray Any []; makeComparerFromEqualityComparer eqComp]
             | _ -> failwith "Unexpected hashset constructor"
-        Some(makeCoreRef Any "HashSet" "Types", args)
+        Some(makeCoreRef Any "HashSet" "DictTypes", args)
     | _ -> None

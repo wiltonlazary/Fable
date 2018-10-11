@@ -24,7 +24,6 @@ module Types =
     let [<Literal>] valueType = "System.ValueType"
     let [<Literal>] array = "System.Array"
     let [<Literal>] type_ = "System.Type"
-    let [<Literal>] typeResolver = "Fable.Core.ITypeResolver`1"
     let [<Literal>] exception_ = "System.Exception"
     let [<Literal>] bool = "System.Boolean"
     let [<Literal>] char = "System.Char"
@@ -72,6 +71,9 @@ module Types =
     let [<Literal>] comparer = "System.Collections.Generic.IComparer`1"
     let [<Literal>] equalityComparer = "System.Collections.Generic.IEqualityComparer`1"
     let [<Literal>] arrayCons = "Array.IArrayCons`1"
+    let [<Literal>] typeResolver = "Fable.Core.ITypeResolver`1"
+    let [<Literal>] adder = "Fable.Core.IGenericAdder`1"
+    let [<Literal>] averager = "Fable.Core.IGenericAverager`1"
 
 [<RequireQualifiedAccess>]
 module Operators =
@@ -89,6 +91,7 @@ module Operators =
     let [<Literal>] booleanOr = "op_BooleanOr"
     let [<Literal>] logicalNot = "op_LogicalNot"
     let [<Literal>] unaryNegation = "op_UnaryNegation"
+    let [<Literal>] divideByInt = "DivideByInt"
     // let [<Literal>] equality = "op_Equality"
     // let [<Literal>] inequality = "op_Inequality"
     // let [<Literal>] lessThan = "op_LessThan"
@@ -250,6 +253,15 @@ module AST =
             |> Option.map (fun expr -> Value(NewOption(Some expr, expr.Type)))
         | _ -> uncurryLambdaInner None [] arity expr
 
+    let (|MaybeCasted|) = function
+        | TypeCast(e,_) -> e
+        | e -> e
+
+    /// Try to uncurry lambdas at compile time in dynamic assignments
+    let (|MaybeLambdaUncurriedAtCompileTime|) = function
+        | MaybeCasted(LambdaUncurriedAtCompileTime None lambda) -> lambda
+        | e -> e
+
     /// When referenced multiple times, is there a risk of double evaluation?
     let rec hasDoubleEvalRisk = function
         | IdentExpr id -> id.IsMutable
@@ -271,25 +283,35 @@ module AST =
         | Unit | GenericParam _ | Option _ -> true
         | _ -> false
 
-    let makeIdent name =
+    /// ATTENTION: Make sure the ident name will be unique within the file
+    let makeIdentNonMangled name =
         { Name = name
           Type = Any
-          Kind = UnespecifiedIdent
+          Kind = UnspecifiedIdent
           IsMutable = false
           IsCompilerGenerated = true
-
           Range = None }
 
-    let makeTypedIdent typ name =
+    /// Mangles ident name to prevent conflicts in the file
+    let makeIdentUnique (com: ICompiler) name =
+        com.GetUniqueVar(name) |> makeIdentNonMangled
+
+    /// ATTENTION: Make sure the ident name will be unique within the file
+    let makeTypedIdentNonMangled typ name =
         { Name = name
           Type = typ
-          Kind = UnespecifiedIdent
+          Kind = UnspecifiedIdent
           IsMutable = false
           IsCompilerGenerated = true
           Range = None }
 
-    let makeIdentExpr name =
-        makeIdent name |> IdentExpr
+    /// Mangles ident name to prevent conflicts in the file
+    let makeTypedIdentUnique (com: ICompiler) typ name =
+        com.GetUniqueVar(name) |> makeTypedIdentNonMangled typ
+
+    /// ATTENTION: Make sure the ident name will be unique within the file
+    let makeIdentExprNonMangled name =
+        makeIdentNonMangled name |> IdentExpr
 
     let makeLoop range loopKind = Loop (loopKind, range)
 
