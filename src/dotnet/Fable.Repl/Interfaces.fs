@@ -42,17 +42,18 @@ type IChecker =
 type IParseResults =
     abstract Errors: Error[]
 
-type IParseFilesResults =
-    abstract Errors: Error[]
-    abstract GetResults: fileName: string -> IParseResults option
+type IBabelResult =
+    abstract BabelAst: obj
+    abstract FableErrors: Error[]
 
 type IFableManager =
-    abstract CreateChecker: references: string[] * readAllBytes: (string -> byte[]) -> IChecker
-    abstract ParseFSharpProject: checker: IChecker * fileName: string * source: string -> IParseResults
-    abstract ParseFSharpProjectFiles: checker: IChecker * projectFileName: string * fileNames: string[] * sources: string[] -> IParseFilesResults
+    abstract CreateChecker: references: string[] * readAllBytes: (string -> byte[]) * defines: string[] * optimize: bool -> IChecker
+    [<System.Obsolete>] abstract CreateChecker: references: string[] * readAllBytes: (string -> byte[]) * definesOpt: string[] option -> IChecker
+    abstract ParseFSharpScript: checker: IChecker * fileName: string * source: string -> IParseResults
+    abstract ParseFSharpProject: checker: IChecker * projectFileName: string * fileNames: string[] * sources: string[] -> IParseResults
     abstract GetParseErrors: parseResults: IParseResults -> Error[]
     abstract GetDeclarationLocation: parseResults: IParseResults * line: int * col: int * lineText: string -> Async<Range option>
     abstract GetToolTipText: parseResults: IParseResults * line: int * col: int * lineText: string -> Async<string[]>
     abstract GetCompletionsAtLocation: parseResults: IParseResults * line: int * col: int * lineText: string -> Async<Completion[]>
-    abstract CompileToBabelAst: fableCore: string * parseResults: IParseResults * fileName: string * optimized: bool -> obj * Error[]
-    abstract FSharpAstToString: parseResults: IParseResults * optimized: bool -> string
+    abstract CompileToBabelAst: fableLibrary: string * parseResults: IParseResults * fileName: string * optimized: bool * ?precompiledLib: (string->(string*string) option) -> IBabelResult
+    abstract FSharpAstToString: parseResults: IParseResults * fileName: string * optimized: bool -> string

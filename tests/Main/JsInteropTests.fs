@@ -7,6 +7,15 @@ open Util.Testing
 open Fable.Core
 open Fable.Core.JsInterop
 
+[<Global>]
+module GlobalModule =
+    [<Emit("var GlobalModule = { add(x, y) { return x + y }, foo: 'bar' }")>]
+    let declare() = ()
+    let add (x: int) (y: int): int = jsNative
+    let foo: string = jsNative
+
+GlobalModule.declare()
+
 let myMeth (x: int) (y: int) = x - y
 
 type IMyOptions =
@@ -80,7 +89,7 @@ let validatePassword = function
 
 let tests =
   testList "JsInterop" [
-    #if FABLE_COMPILER
+#if FABLE_COMPILER
     testCase "Dynamic application works" <| fun () ->
         let dynObj =
             createObj [
@@ -195,18 +204,24 @@ let tests =
     //     actual |> equal expected
 
     testCase "Erased union cases work with keyValueList" <| fun () ->
-        let props: Props list = [ Custom("Foo", 5) ]
-        let actual = [ Custom("Bar", 10) ] |> keyValueList CaseRules.LowerFirst
+        let props: Props list = [ Custom("Foo", 5); Names [|{Name = "Mikhail"}|] ]
+        let compiletime = [Custom("Bar", 10); Names [|{Name = "Mikhail"}|]]
+                          |> keyValueList CaseRules.LowerFirst
         let expected = props |> keyValueList CaseRules.LowerFirst
-        actual?bar |> equal 10
-        expected?foo |> equal 5
+        compiletime?Bar |> equal 10
+        expected?Foo |> equal 5
+        compiletime?names?(0)?Name |> equal "Mikhail"
+        compiletime?names?(0)?Name |> equal "Mikhail"
 
     testCase "Dynamic casting works with keyValueList" <| fun () ->
-        let props: Props list = [ !!("Foo", 5) ]
-        let actual = [ (!!("Bar", 10): Props) ] |> keyValueList CaseRules.LowerFirst
+        let props: Props list = [ !!("Foo", 5); Names [|{Name = "Mikhail"}|] ]
+        let compiletime = [ (!!("Bar", 10): Props); Names [|{Name = "Mikhail"}|] ]
+                          |> keyValueList CaseRules.LowerFirst
         let expected = props |> keyValueList CaseRules.LowerFirst
-        actual?bar |> equal 10
-        expected?foo |> equal 5
+        compiletime?Bar |> equal 10
+        expected?Foo |> equal 5
+        compiletime?names?(0)?Name |> equal "Mikhail"
+        compiletime?names?(0)?Name |> equal "Mikhail"
 
     testCase "Unit argument is not replaced by null in dynamic programming" <| fun () ->
         let o = createObj ["foo" ==> fun () -> argCount]
@@ -262,7 +277,12 @@ let tests =
     testCase "StringEnum attribute works" <| fun () ->
         Vertical |> unbox |> equal "vertical"
         Horizontal |> unbox |> equal "Horizontal"
-    #endif
+
+    // See https://github.com/fable-compiler/fable-import/issues/72
+    testCase "Can use values and functions from global modules" <| fun () ->
+        GlobalModule.add 3 4 |> equal 7
+        GlobalModule.foo |> equal "bar"
+#endif
 
     testCase "Pattern matching with StringEnum works" <| fun () ->
         validatePassword NewPassword

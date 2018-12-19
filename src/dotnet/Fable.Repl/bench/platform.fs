@@ -2,7 +2,7 @@ module Bench.Platform
 
 #if DOTNET_FILE_SYSTEM
 
-let fableCoreDir = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "../../../build/fable-core")
+let fableLibraryDir = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "../../../build/fable-library")
 
 let readAllBytes metadataPath (fileName:string) = System.IO.File.ReadAllBytes (metadataPath + fileName)
 let readAllText (filePath:string) = System.IO.File.ReadAllText (filePath, System.Text.Encoding.UTF8)
@@ -19,7 +19,7 @@ let toJson (value: obj) = sprintf "%A" value // Newtonsoft.Json.JsonConvert.Seri
 
 #else
 
-let fableCoreDir = "${entryDir}/../../../build/fable-core"
+let fableLibraryDir = "${entryDir}/../../../build/fable-library"
 
 type private IFileSystem =
     abstract readFileSync: string -> byte[]
@@ -34,7 +34,7 @@ let private FileSystem: IFileSystem = Fable.Core.JsInterop.importAll "fs"
 let private Process: IProcess = Fable.Core.JsInterop.importAll "process"
 
 let readAllBytes metadataPath (fileName:string) = FileSystem.readFileSync(metadataPath + fileName)
-let readAllText (filePath:string) = FileSystem.readFileSync (filePath, "utf8")
+let readAllText (filePath:string) = (FileSystem.readFileSync (filePath, "utf8")).TrimStart('\uFEFF')
 let writeAllText (filePath:string) (text:string) = FileSystem.writeFileSync (filePath, text)
 
 let measureTime (f: 'a -> 'b) x =

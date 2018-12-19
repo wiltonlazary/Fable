@@ -1,3 +1,42 @@
+### 2.0.11
+
+* Fix conflicting extensions with same type and member names
+
+### 2.0.10
+
+* Improve decimal support #1627
+* Compile fable-core/BigInt from F# #1631
+* Add range info to Debugger statement
+
+### 2.0.9
+
+* Include non-mangled identifier names for source maps
+* Optimize tailcalls returning unit #1624
+* Fix DateTimeOffset @ncave
+* Fix #1607: More descriptive error when two module members have same name
+* Fix #1628: `String.filter Char.IsDigit` freezes REPL
+
+### 2.0.8
+
+* Implement eprintf and eprintfn @inosik
+* Fix #1389: Throw proper error when match cases are incomplete @Zaid-Aja
+* Fix #1602: constructor "as this" notation
+* Only check for Fable.Core major and minor version
+
+### 2.0.6
+
+* Don't change the first letter of erased union cases in keyValueList
+* Updates for creating precompiled libraries
+* Fix `isRelativePath`
+
+### 2.0.4
+
+* Fix #1594 Array.partition results are too long @ericharding
+* Fix #1599: Folders starting with dot @OnurGumus @inosik
+* Check files exist when collecing all sources into single .fsproj @dbrattli
+* Don't trigger Symbol.iterator when testing for iterables
+* Improvements for Fable REPL @ncave
+
 ### 2.0.3
 
 * Fix #1588: MailboxProcessor.PostAndAsyncReply with falsy values @nilekirk

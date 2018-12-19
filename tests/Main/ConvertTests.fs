@@ -48,16 +48,20 @@ let tests =
         parse Decimal.Parse "1.5" |> equal 1.5M
 
     testCase "System.Decimal.TryParse works" <| fun () ->
-        tryParse Decimal.TryParse 0.0M "1" |> equal (true, 1.0M)
-        tryParse Decimal.TryParse 0.0M "    1     " |> equal (true, 1.0M)
-        tryParse Decimal.TryParse 0.0M "1.5" |> equal (true, 1.5M)
-        tryParse Decimal.TryParse 0.0M "    1.5     " |> equal (true, 1.5M)
-        tryParse Decimal.TryParse 0.0M "foo" |> equal (false, 0.0M)
-        tryParse Decimal.TryParse 0.0M "9X" |> equal (false, 0.0M)
-        tryParse Decimal.TryParse 0.0M "X9" |> equal (false, 0.0M)
-        tryParse Decimal.TryParse 0.0M "X9TRE34" |> equal (false, 0.0M)
-        tryParse Decimal.TryParse 0.0M "9SayWhat12Huh" |> equal (false, 0.0M)
-        tryParse Decimal.TryParse 0.0M "-1.5" |> equal (true, -1.5M)
+        let equal expected (success, actual) =
+            match expected with
+            | Some expected -> equal true success; equal expected actual
+            | None -> equal false success
+        tryParse Decimal.TryParse 0.0M "1" |> equal (Some 1.0M)
+        tryParse Decimal.TryParse 0.0M "    1     " |> equal (Some 1.0M)
+        tryParse Decimal.TryParse 0.0M "1.5" |> equal (Some 1.5M)
+        tryParse Decimal.TryParse 0.0M "    1.5     " |> equal (Some 1.5M)
+        tryParse Decimal.TryParse 0.0M "foo" |> equal None
+        tryParse Decimal.TryParse 0.0M "9X" |> equal None
+        tryParse Decimal.TryParse 0.0M "X9" |> equal None
+        tryParse Decimal.TryParse 0.0M "X9TRE34" |> equal None
+        tryParse Decimal.TryParse 0.0M "9SayWhat12Huh" |> equal None
+        tryParse Decimal.TryParse 0.0M "-1.5" |> equal (Some -1.5M)
 
     testCase "System.Single.Parse works" <| fun () ->
         parse Single.Parse "1.5" |> equal 1.5f
@@ -74,8 +78,45 @@ let tests =
         tryParse Single.TryParse 0.0f "9SayWhat12Huh" |> equal (false, 0.0f)
         tryParse Single.TryParse 0.0f "-1.5" |> equal (true, -1.5f)
 
+    testCase "System.SByte.Parse works" <| fun () ->
+        SByte.Parse("5") |> equal 5y
+        SByte.Parse("-5") |> equal -5y
+        SByte.Parse("-128") |> equal -128y
+        (fun () -> SByte.Parse("128")) |> throwsError ""
+        (fun () -> SByte.Parse("5f")) |> throwsError "Input string was not in a correct format."
+        (fun () -> SByte.Parse("F")) |> throwsError "Input string was not in a correct format."
+        (fun () -> SByte.Parse("5o")) |> throwsError "Input string was not in a correct format."
+
+    testCase "System.SByte.Parse with hex works" <| fun () ->
+        SByte.Parse("55", System.Globalization.NumberStyles.HexNumber) |> equal 85y
+        SByte.Parse("5f", System.Globalization.NumberStyles.HexNumber) |> equal 95y
+        SByte.Parse("FF", System.Globalization.NumberStyles.HexNumber) |> equal -1y
+        (fun () -> SByte.Parse("1FF", System.Globalization.NumberStyles.HexNumber)) |> throwsError ""
+        (fun () -> SByte.Parse("5o", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
+        (fun () -> SByte.Parse("o5", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
+
+    testCase "System.Int16.Parse works" <| fun () ->
+        Int16.Parse("5") |> equal 5s
+        Int16.Parse("-5") |> equal -5s
+        Int16.Parse("-32768") |> equal -32768s
+        (fun () -> Int16.Parse("32768")) |> throwsError ""
+        (fun () -> Int16.Parse("5f")) |> throwsError "Input string was not in a correct format."
+        (fun () -> Int16.Parse("FFF")) |> throwsError "Input string was not in a correct format."
+        (fun () -> Int16.Parse("5fo0")) |> throwsError "Input string was not in a correct format."
+
+    testCase "System.Int16.Parse with hex works" <| fun () ->
+        Int16.Parse("5555", System.Globalization.NumberStyles.HexNumber) |> equal 21845s
+        Int16.Parse("5f", System.Globalization.NumberStyles.HexNumber) |> equal 95s
+        Int16.Parse("FFFF", System.Globalization.NumberStyles.HexNumber) |> equal -1s
+        (fun () -> Int16.Parse("1FFFF", System.Globalization.NumberStyles.HexNumber)) |> throwsError ""
+        (fun () -> Int16.Parse("5foo", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
+        (fun () -> Int16.Parse("foo5", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
+
     testCase "System.Int32.Parse works" <| fun () ->
         Int32.Parse("5") |> equal 5
+        Int32.Parse("-5") |> equal -5
+        Int32.Parse("-2147483648") |> equal -2147483648
+        (fun () -> Int32.Parse("2147483648")) |> throwsError ""
         (fun () -> Int32.Parse("5f")) |> throwsError "Input string was not in a correct format."
         (fun () -> Int32.Parse("f5")) |> throwsError "Input string was not in a correct format."
         (fun () -> Int32.Parse("foo")) |> throwsError "Input string was not in a correct format."
@@ -83,18 +124,27 @@ let tests =
     testCase "System.Int32.Parse with hex works" <| fun () ->
         Int32.Parse("555555", System.Globalization.NumberStyles.HexNumber) |> equal 5592405
         Int32.Parse("5f", System.Globalization.NumberStyles.HexNumber) |> equal 95
+        Int32.Parse("FFFFFFFF", System.Globalization.NumberStyles.HexNumber) |> equal -1
+        (fun () -> Int32.Parse("1FFFFFFFF", System.Globalization.NumberStyles.HexNumber)) |> throwsError ""
         (fun () -> Int32.Parse("5foo", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
         (fun () -> Int32.Parse("foo5", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
 
     testCase "System.Int64.Parse works" <| fun () ->
         Int64.Parse("5") |> equal 5L
         Int64.Parse("-5") |> equal -5L
-        (fun () -> Int64.Parse("5f")) |> throwsError ""
+        Int64.Parse("-9223372036854775808") |> equal -9223372036854775808L
+        (fun () -> Int64.Parse("9223372036854775808")) |> throwsError ""
+        (fun () -> Int64.Parse("5f")) |> throwsError "Input string was not in a correct format."
+        (fun () -> Int64.Parse("f5")) |> throwsError "Input string was not in a correct format."
+        (fun () -> Int64.Parse("foo")) |> throwsError "Input string was not in a correct format."
 
     testCase "System.Int64.Parse with hex works" <| fun () ->
         Int64.Parse("555555", System.Globalization.NumberStyles.HexNumber) |> equal 5592405L
-        Int32.Parse("5f", System.Globalization.NumberStyles.HexNumber) |> equal 95
+        Int64.Parse("5f", System.Globalization.NumberStyles.HexNumber) |> equal 95L
+        Int64.Parse("FFFFFFFFFFFFFFFF", System.Globalization.NumberStyles.HexNumber) |> equal -1L
+        (fun () -> Int64.Parse("1FFFFFFFFFFFFFFFF", System.Globalization.NumberStyles.HexNumber)) |> throwsError ""
         (fun () -> Int64.Parse("5foo", System.Globalization.NumberStyles.HexNumber)) |> throwsError ""
+        (fun () -> Int64.Parse("foo5", System.Globalization.NumberStyles.HexNumber)) |> throwsError "Input string was not in a correct format."
 
     testCase "Parsing integers with different radices works" <| fun () ->
         equal 11 (int "11")
@@ -119,6 +169,10 @@ let tests =
         tryParse Int32.TryParse 0 "X9TRE34" |> equal (false, 0)
         tryParse Int32.TryParse 0 "9SayWhat12Huh" |> equal (false, 0)
         tryParse Int32.TryParse 0 "-1" |> equal (true, -1)
+
+    testCase "BigInt.TryParse works" <| fun () ->
+        tryParse bigint.TryParse 0I "4234523548923954" |> equal (true, 4234523548923954I)
+        tryParse bigint.TryParse 0I "9SayWhat12Huh" |> equal (false, 0I)
 
     //-------------------------------------
     // System.Convert
@@ -571,7 +625,7 @@ let tests =
         decimal(1.) |> equal x
         decimal(1.m) |> equal x
         decimal("1.") |> equal x
-        (fun () -> decimal("foo")) |> throwsError "Input string was not in a correct format."
+        (fun () -> decimal("foo")) |> throwsError ""
 
         Convert.ToDecimal(1y) |> equal x
         Convert.ToDecimal(1uy) |> equal x
@@ -586,7 +640,7 @@ let tests =
         Convert.ToDecimal(1.) |> equal x
         Convert.ToDecimal(1.m) |> equal x
         parse Convert.ToDecimal "1." |> equal x
-        (fun () -> Convert.ToDecimal("foo")) |> throwsError "Input string was not in a correct format."
+        (fun () -> Convert.ToDecimal("foo")) |> throwsError ""
 
     // String to number convertions (with base)
 
@@ -971,6 +1025,12 @@ let tests =
         let g2 = Guid("{96258006-c4ba-4a7f-80c4-de7f2b2898c5}")
         g1.ToString().Trim('{','}').ToLower() |> equal "96258006-c4ba-4a7f-80c4-de7f2b2898c5"
         g2.ToString().Trim('{','}').ToLower() |> equal "96258006-c4ba-4a7f-80c4-de7f2b2898c5"
+
+    testCase "Guid.Parse works relaxed" <| fun () ->
+        let g1 = Guid.Parse("773788c2-ae1c-2ce4-e053-6c04a8c05e57")
+        let g2 = Guid("{00000000-0000-0000-0000-000000000000}")
+        g1.ToString().Trim('{','}').ToLower() |> equal "773788c2-ae1c-2ce4-e053-6c04a8c05e57"
+        g2.ToString().Trim('{','}').ToLower() |> equal "00000000-0000-0000-0000-000000000000"
 
     testCase "Guid.Parse fails if string is not well formed" <| fun () ->
         let success =

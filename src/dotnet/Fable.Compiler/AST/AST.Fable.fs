@@ -97,11 +97,11 @@ type Declaration =
     | AttachedMemberDeclaration of args: Ident list * body: Expr * AttachedMemberDeclarationInfo
     | ConstructorDeclaration of ConstructorKind
 
-type File(sourcePath, decls, ?usedVarNames, ?dependencies) =
+type File(sourcePath, decls, ?usedVarNames, ?inlineDependencies) =
     member __.SourcePath: string = sourcePath
     member __.Declarations: Declaration list = decls
     member __.UsedVarNames: Set<string> = defaultArg usedVarNames Set.empty
-    member __.Dependencies: Set<string> = defaultArg dependencies Set.empty
+    member __.InlineDependencies: Set<string> = defaultArg inlineDependencies Set.empty
 
 type IdentKind =
     | UnspecifiedIdent
@@ -115,12 +115,18 @@ type Ident =
       IsMutable: bool
       IsCompilerGenerated: bool
       Range: SourceLocation option }
-      member x.IsBaseValue = match x.Kind with BaseValueIdent -> true | _ -> false
-      member x.IsThisArgDeclaration = match x.Kind with ThisArgIdentDeclaration -> true | _ -> false
+      member x.IsBaseValue =
+        match x.Kind with BaseValueIdent -> true | _ -> false
+      member x.IsThisArgDeclaration =
+        match x.Kind with ThisArgIdentDeclaration -> true | _ -> false
+      member x.DisplayName =
+        x.Range
+        |> Option.bind (fun r -> r.identifierName)
+        |> Option.defaultValue x.Name
 
 type ImportKind =
-    | CoreLib
     | Internal
+    | Library
     | CustomImport
 
 type EnumKind = NumberEnum of Expr | StringEnum of Expr
@@ -214,6 +220,8 @@ type ReplaceCallInfo =
     /// See ArgIngo.SignatureArgTypes
     SignatureArgTypes: Type list
     Spread: SpreadKind
+    IsModuleValue: bool
+    IsInterface: bool
     DeclaringEntityFullName: string
     GenericArgs: (string * Type) list }
 
@@ -265,7 +273,7 @@ type Expr =
     | Value of ValueKind
     | IdentExpr of Ident
     | TypeCast of Expr * Type
-    /// Some expressions must be resolved in the last pass for better optimization (e.g. list to seq cast)
+    /// Some expressions must be resolved in the last pass for better optimization
     | DelayedResolution of DelayedResolutionKind * Type * SourceLocation option
     | Import of selector: Expr * path: Expr * ImportKind * Type * SourceLocation option
 
@@ -276,7 +284,7 @@ type Expr =
     | Operation of OperationKind * typ: Type * range: SourceLocation option
     | Get of Expr * GetKind * typ: Type * range: SourceLocation option
 
-    | Debugger
+    | Debugger of range: SourceLocation option
     | Throw of Expr * typ: Type * range: SourceLocation option
 
     | DecisionTree of Expr * targets: (Ident list * Expr) list
@@ -297,7 +305,7 @@ type Expr =
         | IdentExpr id -> id.Type
         | TypeCast(_,t) | Import(_,_,_,t,_) | DelayedResolution(_,t,_) | ObjectExpr(_,t,_)
         | Operation(_,t,_) | Get(_,_,t,_) | Throw(_,t,_) | DecisionTreeSuccess(_,_,t) -> t
-        | Debugger | Set _ | Loop _ -> Unit
+        | Debugger _ | Set _ | Loop _ -> Unit
         | Sequential exprs -> (List.last exprs).Type
         | Let(_,expr) | TryCatch(expr,_,_) | IfThenElse(_,expr,_) | DecisionTree(expr,_) -> expr.Type
         | Function(kind,body,_) ->
@@ -308,9 +316,9 @@ type Expr =
     member this.Range: SourceLocation option =
         match this with
         | Value _ | Import _ | DelayedResolution _
-        | ObjectExpr _ | Debugger | Sequential _ | Let _
+        | ObjectExpr _ | Sequential _ | Let _
         | IfThenElse _ | TryCatch _ | DecisionTree _ | DecisionTreeSuccess _ -> None
 
         | Function(_,e,_) | TypeCast(e,_) -> e.Range
         | IdentExpr id -> id.Range
-        | Test(_,_,r) | Operation(_,_,r) | Get(_,_,_,r) | Throw(_,_,r) | Set(_,_,_,r) | Loop(_,r) -> r
+        | Debugger r | Test(_,_,r) | Operation(_,_,r) | Get(_,_,_,r) | Throw(_,_,r) | Set(_,_,_,r) | Loop(_,r) -> r

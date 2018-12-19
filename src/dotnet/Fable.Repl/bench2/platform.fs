@@ -1,7 +1,7 @@
 module Bench.Platform
 
 let testScriptPath =  "${entryDir}/test_script.fsx"
-let fableCoreDir = "${entryDir}/../out-fable-core"
+let fableLibraryDir = "${entryDir}/../out-fable-library"
 
 type IFileSystem =
     abstract readFileSync: string -> byte[]
@@ -17,7 +17,7 @@ let Process: IProcess = Fable.Core.JsInterop.importAll "process"
 
 let initFable (): Fable.Repl.IFableManager = Fable.Core.JsInterop.import "init" "${entryDir}/../out2/Main"
 let readAllBytes metadataPath (fileName:string) = FileSystem.readFileSync(metadataPath + fileName)
-let readAllText (filePath:string) = FileSystem.readFileSync (filePath, "utf8")
+let readAllText (filePath:string) = (FileSystem.readFileSync (filePath, "utf8")).TrimStart('\uFEFF')
 let writeAllText (filePath:string) (text:string) = FileSystem.writeFileSync (filePath, text)
 
 let measureTime (f: 'a -> 'b) x =

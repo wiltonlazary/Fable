@@ -1,3 +1,15 @@
+### 2.0.3
+
+* Add `Fable.Core.Reflection` module
+
+### 2.0.2
+
+* Add `nameof2` and `exportDefault`
+
+### 2.0.1
+
+* Fix `ReadonlyArray` spelling
+
 ### 2.0.0
 
 * Fable 2

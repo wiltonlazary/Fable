@@ -44,7 +44,7 @@ type EmitAttribute(macro: string) =
 type PassGenericsAttribute() =
     inherit Attribute()
 
-[<Obsolete("Doesn't to anything in Fable 2, use `Fable.Core.JsInterop.toPlainJsObj` if needed.")>]
+[<Obsolete("Doesn't do anything in Fable 2, use `Fable.Core.JsInterop.toPlainJsObj` if needed.")>]
 type PojoAttribute() =
     inherit Attribute()
 
@@ -66,12 +66,12 @@ type ParamListAttribute() =
 type InjectAttribute() =
     inherit Attribute()
 
-/// Intended for replacement types in Fable.Core.JS
+/// Intended for replacement types in Fable.Library
 [<AttributeUsage(AttributeTargets.Class)>]
 type ReplacesAttribute(replacedTypeFullName: string) =
     inherit Attribute()
 
-/// Intended for replacement types in Fable.Core.JS
+/// Intended for replacement types in Fable.Library
 [<AttributeUsage(AttributeTargets.Method)>]
 type OverloadSuffixAttribute(value: string) =
     inherit Attribute()

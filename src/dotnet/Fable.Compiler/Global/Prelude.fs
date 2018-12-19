@@ -18,13 +18,13 @@ type Position =
     static member Empty = { line = 1; column = 0 }
 
 type SourceLocation =
-    { (*source: string option;*) start: Position; ``end``: Position; }
-    member x.Collapse() =
-        { start = x.start; ``end`` = x.start }
-    static member (+) (r1: SourceLocation, r2: SourceLocation) =
-        { start = r1.start; ``end`` = r2.``end`` }
+    { start: Position;
+      ``end``: Position;
+      identifierName: string option }
     static member Empty =
-        { start = Position.Empty; ``end`` = Position.Empty }
+        { start = Position.Empty
+          ``end`` = Position.Empty
+          identifierName = None }
     override x.ToString() =
         sprintf "(L%i,%i-L%i,%i)"
             x.start.line x.start.column
@@ -163,6 +163,10 @@ module Naming =
                 })
         else ident
 
+    /// Does not guarantee unique names, only used to clean function constructor names
+    let unsafeReplaceIdentForbiddenChars (replacement: char) (ident: string): string =
+        ident.ToCharArray() |> Array.mapi (fun i c -> if isIdentChar i c then c else replacement) |> System.String
+
     let removeGetSetPrefix (s: string) =
         if s.StartsWith("get_") || s.StartsWith("set_") then
             s.Substring(4)
@@ -220,6 +224,13 @@ module Naming =
     let getUniqueName baseName (index: int) =
         "$" + baseName + "$$" + string index
 
+    let appendSuffix baseName suffix =
+        if suffix = ""
+        then baseName
+        else baseName + "$" + suffix
+
+    let reflectionSuffix = "reflection"
+
     let private printPart sanitize separator part overloadSuffix =
         (if part = "" then "" else separator + (sanitize part)) +
             (if overloadSuffix = "" then "" else "$$" + overloadSuffix)
@@ -234,20 +245,22 @@ module Naming =
     let buildNameWithoutSanitation name part =
         buildName id name part
 
-    /// This helper is intended for instance and static members in fable-core library compiled from F# (FSharpSet, FSharpMap...)
+    /// This helper is intended for instance and static members in fable-library library compiled from F# (FSharpSet, FSharpMap...)
     let buildNameWithoutSanitationFrom (entityName: string) isStatic memberCompiledName overloadSuffix =
         (if isStatic
             then entityName, StaticMemberPart(memberCompiledName, overloadSuffix)
             else entityName, InstanceMemberPart(memberCompiledName, overloadSuffix))
         ||> buildName id
 
+    let checkJsKeywords name =
+        if jsKeywords.Contains name
+        then name + "$"
+        else name
+
     let sanitizeIdent conflicts name part =
         // Replace Forbidden Chars
-        let sanitizedName = buildName sanitizeIdentForbiddenChars name part
-        // Check if it's a keyword or clashes with module ident pattern
-        (if jsKeywords.Contains sanitizedName
-            then sanitizedName + "$"
-            else sanitizedName)
+        buildName sanitizeIdentForbiddenChars name part
+        |> checkJsKeywords
         // Check if it already exists
         |> preventConflicts conflicts
 
@@ -255,10 +268,10 @@ module Path =
     open System
 
     let Combine (path1: string, path2: string) =
-        (path1.TrimEnd [|'\\';'/'|]) + "/" + (path2.TrimStart [|'\\';'/'|])
-
-    let Combine3 (path1: string, path2: string, path3: string) =
-        (path1.TrimEnd [|'\\';'/'|]) + "/" + (path2.Trim [|'\\';'/'|]) + "/" + (path3.TrimStart [|'\\';'/'|])
+        let path1 =
+            if path1.Length = 0 then path1
+            else (path1.TrimEnd [|'\\';'/'|]) + "/"
+        path1 + (path2.TrimStart [|'\\';'/'|])
 
     let ChangeExtension (path: string, ext: string) =
         let i = path.LastIndexOf(".")
@@ -273,7 +286,7 @@ module Path =
     let GetFileName (path: string) =
         let normPath = path.Replace("\\", "/").TrimEnd('/')
         let i = normPath.LastIndexOf("/")
-        path.Substring(i + 1)
+        normPath.Substring(i + 1)
 
     let GetFileNameWithoutExtension (path: string) =
         let filename = GetFileName path
@@ -285,7 +298,7 @@ module Path =
         let normPath = path.Replace("\\", "/")
         let i = normPath.LastIndexOf("/")
         if i < 0 then ""
-        else path.Substring(0, i)
+        else normPath.Substring(0, i)
 
     let GetFullPath (path: string) =
 #if FABLE_COMPILER
@@ -295,7 +308,7 @@ module Path =
 #endif
 
     let normalizePath (path: string) =
-        path.Replace("\\", "/")
+        path.Replace('\\', '/')
 
     let normalizeFullPath (path: string) =
         normalizePath (GetFullPath path)
@@ -303,9 +316,24 @@ module Path =
     /// If path belongs to a signature file (.fsi), replace the extension with .fs
     let normalizePathAndEnsureFsExtension (path: string) =
         let path = normalizePath path
-        if path.EndsWith("fsi")
+        if path.EndsWith(".fsi")
         then path.Substring(0, path.Length - 1)
         else path
+
+    /// Checks if path starts with "./", ".\" or ".."
+    let isRelativePath (path: string) =
+        let len = path.Length
+        if len = 0
+        then false
+        elif path.[0] = '.' then
+            if len = 1
+            then true
+            // Some folders start with a dot, see #1599
+            // For simplicity, ignore folders starting with TWO dots
+            else match path.[1] with
+                    | '/' | '\\' | '.' -> true
+                    | _ -> false
+        else false
 
     /// Creates a relative path from one file or folder to another.
     let getRelativeFileOrDirPath fromIsDir fromFullPath toIsDir toFullPath =
@@ -344,7 +372,9 @@ module Path =
             let fromPath = addDummyFile fromIsDir fromFullPath
             let toPath = addDummyFile toIsDir toFullPath
             match (pathDifference fromPath toPath).Replace(Naming.dummyFile, "") with
-            | path when path.StartsWith "." -> path
+            | "" -> "."
+            // Some folders start with a period, see #1599
+            | path when isRelativePath path -> path
             | path -> "./" + path
 
     let getRelativePath fromFullPath toFullPath =
