@@ -6,6 +6,7 @@ open Util.Testing
 #if FABLE_COMPILER
 open Fable.Core
 open Fable.Core.JsInterop
+open Fable.Core.Experimental
 
 [<Global>]
 module GlobalModule =
@@ -81,6 +82,10 @@ type MyStrings =
 [<StringEnum>]
 #endif
 type Field = OldPassword | NewPassword | ConfirmPassword
+
+type MyInterface =
+    abstract foo: int
+    abstract bar: string
 
 let validatePassword = function
     | OldPassword -> "op"
@@ -223,6 +228,15 @@ let tests =
         compiletime?names?(0)?Name |> equal "Mikhail"
         compiletime?names?(0)?Name |> equal "Mikhail"
 
+    testCase "Cast an anonymous record to an interface" <| fun () ->
+        // The first three must raise warnings
+        // let x: MyInterface = !!{| foo = "4"; bar = "5" |}
+        // let y: MyInterface = !!{| foo = 4 |}
+        // let z: MyInterface = !!{| foo = 4; bAr = "5" |}
+        let u: MyInterface = !!{| foo = 4; bar = "5" |}
+        equal 4 u.foo
+        equal "5" u.bar
+
     testCase "Unit argument is not replaced by null in dynamic programming" <| fun () ->
         let o = createObj ["foo" ==> fun () -> argCount]
         o?foo() |> equal 0
@@ -282,6 +296,10 @@ let tests =
     testCase "Can use values and functions from global modules" <| fun () ->
         GlobalModule.add 3 4 |> equal 7
         GlobalModule.foo |> equal "bar"
+
+    testCase "Local import with curried signatures works" <| fun () ->
+        let add (x:int) (y:int): int = importMember "./js/1foo.js"
+        3 |> add 2 |> equal 5
 #endif
 
     testCase "Pattern matching with StringEnum works" <| fun () ->

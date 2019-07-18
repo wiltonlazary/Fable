@@ -22,6 +22,17 @@ type Get =
     | GetZero of replyChannel: AsyncReplyChannel<int>
     | GetOne of replyChannel: AsyncReplyChannel<int>
 
+let sleepAndAssign token res =
+    Async.StartImmediate(async {
+        do! Async.Sleep 200
+        res := true
+    }, token)
+
+let asyncMap f a = async {
+    let! a = a
+    return f a
+}
+
 let tests =
   testList "Async" [
     testCase "Simple async translates without exception" <| fun () ->
@@ -112,11 +123,6 @@ let tests =
     #if FABLE_COMPILER
     testCaseAsync "Async cancellation works" <| fun () ->
         async {
-            let sleepAndAssign token res =
-                Async.StartImmediate(async {
-                    do! Async.Sleep 200
-                    res := true
-                }, token)
             let res1, res2, res3 = ref false, ref false, ref false
             let tcs1 = new System.Threading.CancellationTokenSource(50)
             let tcs2 = new System.Threading.CancellationTokenSource()
@@ -130,6 +136,19 @@ let tests =
             equal false !res1
             equal false !res2
             equal true !res3
+        }
+
+    testCaseAsync "CancellationTokenSource.Register works" <| fun () ->
+        async {
+            let mutable x = 0
+            let res1 = ref false
+            let tcs1 = new System.Threading.CancellationTokenSource(50)
+            let foo = tcs1.Token.Register(fun () ->
+                x <- x + 1)
+            sleepAndAssign tcs1.Token res1
+            do! Async.Sleep 500
+            equal false !res1
+            equal 1 x
         }
     #endif
 
@@ -445,4 +464,14 @@ let tests =
         x <- x + result1 + result2
         equal x "ABCDEF"
       }
+
+    testCaseAsync "Unit arguments are erased" <| fun () -> // See #1832
+        let mutable token = 0
+        async {
+            let! res =
+                async.Return 5
+                |> asyncMap (fun x -> token <- x)
+            equal 5 token
+            res
+        }
   ]
