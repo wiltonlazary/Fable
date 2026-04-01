@@ -1,0 +1,40 @@
+{
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/bin": true,
+        "**/obj": true,
+        "**/.fake": true,
+        "**/node_modules": true,
+        "**/bower_components": true
+    },
+    "files.trimTrailingWhitespace": true,
+    "files.trimFinalNewlines": true,
+    "gitlens.codeLens.enabled": false,
+    "FSharp.excludeProjectDirectories": [
+        ".git",
+        "paket-files",
+        "fable_modules",
+        "packages",
+        "node_modules",
+        "src/fcs-fable"
+    ],
+    "rust-analyzer.linkedProjects": [
+        "temp/fable-library-rust/Cargo.toml",
+        "temp/tests/Rust/Cargo.toml"
+    ],
+    "editor.inlayHints.enabled": "offUnlessPressed",
+    "dotnet.defaultSolution": "Fable.sln",
+    "python.testing.pytestArgs": [
+        "temp"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "files.associations": {
+        "*.jsx.actual": "javascript",
+        "*.jsx.expected": "javascript"
+    }
+}

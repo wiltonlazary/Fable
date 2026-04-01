@@ -1,18 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <DisableImplicitFSharpCoreReference>false</DisableImplicitFSharpCoreReference>
     <Description>Fable Core Library</Description>
     <TargetFramework>netstandard2.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Version>3.0.0</Version>
-    <PackageVersion>3.0.0</PackageVersion>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Fable.Core.Types.fs" />
     <Compile Include="Fable.Core.Util.fs" />
     <Compile Include="Fable.Core.JS.fs" />
+    <Compile Include="Fable.Core.Py.fs" />
+    <Compile Include="Fable.Core.Dart.fs" />
+    <Compile Include="Fable.Core.Rust.fs" />
     <Compile Include="Fable.Core.JsInterop.fs" />
+    <Compile Include="Fable.Core.PhpInterop.fs" />
+    <Compile Include="Fable.Core.PyInterop.fs" />
+    <Compile Include="Fable.Core.RustInterop.fs" />
+    <Compile Include="Fable.Core.BeamInterop.fs" />
     <Compile Include="Fable.Core.Extensions.fs" />
+    <Content Include="CHANGELOG.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="4.7.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="EasyBuild.PackageReleaseNotes.Tasks" Version="2.1.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 </Project>

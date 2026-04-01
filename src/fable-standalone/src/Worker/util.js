@@ -1,22 +1,5 @@
 /// @ts-check
 
-// @ts-ignore
-import * as BabelPlugins from "fable-babel-plugins";
-import { template, transformFromAstSync } from "@babel/core";
-
-export function resolveLibCall(libMap, entityName) {
-    if (libMap != null) {
-        var k = Object.keys(libMap).find((k) => entityName.indexOf(k) === 0);
-        if (k != null) {
-            var result = libMap[k];
-            // Remove the root module
-            var entityNameTrimmed = entityName.substr(result[0].length).replace(/^\.+/, "");
-            return [entityNameTrimmed, "fable-repl-lib/" + result[1]];
-        }
-    }
-    return null;
-}
-
 function fetchBlob(getUrl, name) {
     return fetch(getUrl(name))
         .then(function (res) {
@@ -41,29 +24,8 @@ export function getAssemblyReader(getUrl, assemblies) {
         });
 }
 
-function babelOptions(BabelTemplate, extraPlugin) {
-    var commonPlugins = [
-        BabelPlugins.getTransformMacroExpressions(BabelTemplate),
-        BabelPlugins.getRemoveUnneededNulls(),
-    ];
-    return {
-        plugins:
-            extraPlugin != null
-                ? commonPlugins.concat(extraPlugin)
-                : commonPlugins,
-        filename: 'repl',
-        babelrc: false,
-    };
-}
-
-export function getBabelAstCompiler() {
-    // Use a promise so we can easily make the Babel dependency
-    // an asynchronous chunk if necessary
-    return new Promise(function (resolve) {
-        resolve(function(ast) {
-            var optionsES2015 = babelOptions(template);
-            var codeES2015 = transformFromAstSync(ast, null, optionsES2015).code;
-            return codeES2015;
-        });
-    });
+// JSON.stringify doesn't escape line/paragraph separators, which are not valid in JS.
+// https://github.com/expressjs/express/issues/1132
+export function escapeJsStringLiteral(str) {
+  return JSON.stringify(str).slice(1, -1).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }

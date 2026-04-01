@@ -1,0 +1,8 @@
+
+function g(a) {
+    return (a + 1) | 0;
+}
+
+export function f(b) {
+    return g(b) | 0;
+}

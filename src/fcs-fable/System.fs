@@ -4,6 +4,12 @@
 
 namespace System
 
+type Environment() =
+    static member ProcessorCount = 1
+    static member Exit(_exitcode) = ()
+    static member GetEnvironmentVariable(_variable) = null
+    static member StackTrace = ""
+
 module Diagnostics =
     type Trace() =
         static member TraceInformation(_s) = () //TODO: proper implementation
@@ -11,6 +17,18 @@ module Diagnostics =
 module Reflection =
     type AssemblyName(assemblyName: string) =
         member x.Name = assemblyName //TODO: proper implementation
+
+module Threading =
+    type AsyncLocal<'T>() =
+        let mutable value: 'T = Unchecked.defaultof<'T>
+        member val Value = value with get, set
+
+    type Interlocked() =
+        //TODO: threaded implementation
+        static member Increment(i: int32 byref): int32 = i <- i + 1; i
+        static member Increment(i: int64 byref): int64 = i <- i + 1L; i
+        static member Decrement(i: int32 byref): int32 = i <- i - 1; i
+        static member Decrement(i: int64 byref): int64 = i <- i - 1L; i
 
 type WeakReference<'T>(v: 'T) =
     member x.TryGetTarget () = (true, v)
@@ -27,3 +45,10 @@ type StringComparer(comp: System.StringComparison) =
             | _ -> failwithf "Unsupported StringComparison: %A" comp
     interface System.Collections.Generic.IComparer<string> with
         member x.Compare(a,b) = System.String.Compare(a, b, comp)
+
+type ArraySegment<'T>(arr: 'T[]) =
+    member _.Array = arr
+    member _.Count = arr.Length
+    member _.Offset = 0
+    new (arr: 'T[], offset: int, count: int) =
+        ArraySegment<'T>(Array.sub arr offset count)

@@ -2,29 +2,47 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <RollForward>Major</RollForward>
     <DefineConstants>$(DefineConstants);DOTNET_FILE_SYSTEM</DefineConstants>
     <OtherFlags>$(OtherFlags) --crossoptimize-</OtherFlags>
-    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
   </PropertyGroup>
 
-  <!-- CoreRT optimization settings (https://aka.ms/OptimizeCoreRT) -->
-  <!-- <PropertyGroup>
-    <RootAllApplicationAssemblies>false</RootAllApplicationAssemblies>
-    <IlcGenerateCompleteTypeMetadata>false</IlcGenerateCompleteTypeMetadata>
-    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
-    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
-    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
-  </PropertyGroup> -->
+  <!-- AOT settings (https://aka.ms/OptimizeCoreRT) -->
+  <PropertyGroup>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- <PublishAot>true</PublishAot> -->
+    <!-- <PublishTrimmed>true</PublishTrimmed> -->
+    <!-- <StripSymbols>true</StripSymbols> -->
+    <!-- <IlcTrimMetadata>true</IlcTrimMetadata> -->
+    <!-- <IlcDisableReflection>true</IlcDisableReflection> -->
+    <!-- <IlcOptimizationPreference>Speed</IlcOptimizationPreference> -->
+    <!-- <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies> -->
+    <!-- <IlcGenerateCompleteTypeMetadata>false</IlcGenerateCompleteTypeMetadata> -->
+    <!-- <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData> -->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <WasmMainJSPath>main.mjs</WasmMainJSPath>
+    <!-- <RunAOTCompilation>true</RunAOTCompilation> -->
+    <!-- <WasmStripILAfterAOT>true</WasmStripILAfterAOT> -->
+    <!-- enable reporting to profiler in browser dev tools -->
+    <!-- <WasmProfilers>browser;</WasmProfilers> -->
+    <!-- Put "framework" (dotnet.js, dlls, etc) files directly into the AppBundle -->
+    <!-- <WasmRuntimeAssetsLocation>./</WasmRuntimeAssetsLocation> -->
+    <!-- <RuntimeIdentifier>browser-wasm</RuntimeIdentifier> -->
+    <!-- <RunAOTCompilation>true</RunAOTCompilation> -->
+    <!-- <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling> -->
+    <!-- <WasmEnableSIMD>true</WasmEnableSIMD> -->
+  </PropertyGroup>
 
   <ItemGroup>
-    <RdXmlFile Include="rd.xml" />
+    <!-- <RdXmlFile Include="rd.xml" /> -->
+    <!-- <RuntimeHostConfigurationOption Include="System.Text.Json.Serialization.EnableSourceGenReflectionFallback" Value="true" /> -->
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="FSharp.Core" Version="4.6.2" />
-    <PackageReference Include="Newtonsoft.Json" Version="12.0.1" />
-    <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="1.0.0-alpha-*" />
+    <PackageReference Include="source-map-sharp" Version="1.0.9" />
   </ItemGroup>
 
   <ItemGroup>

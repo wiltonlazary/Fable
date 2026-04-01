@@ -1,0 +1,292 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  security-events: write
+
+jobs:
+  # Separate job that verifies if all code was formatted correctly
+  # Run `dotnet fantomas .` to format all code.
+  verify-linting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Check F# code
+        run: dotnet fantomas . --check --verbosity d
+
+  # Verify that Fable.sln can be restored
+  # See: https://github.com/fable-compiler/Fable/issues/3687
+  restore-project:
+    name: Check that solution can be restored
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore project
+        run: dotnet restore Fable.sln
+
+  # Separate build job for JavaScript
+  build-javascript:
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v5
+
+      - name: Fable Tests - JavaScript (linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: ./build.sh test javascript
+
+      - name: Fable Tests - JavaScript (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: .\build.bat test javascript
+
+  # Separate build job for TypeScript
+  build-typescript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v5
+
+      - name: Fable Tests - TypeScript
+        run: ./build.sh test typescript
+
+    # - name: Fable Tests - TypeScript
+    #   run: dotnet fsi build.fsx test-ts
+
+  # Separate build job for Integration
+  build-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v5
+
+      - name: Fable Tests
+        run: ./build.sh test integration
+
+  # Separate build job for Standalone
+  build-standalone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v5
+
+      - name: Fable Tests
+        run: ./build.sh test standalone
+
+  # Separate build job for Python since we use a test matrix (will run in parallell)
+  build-python:
+    timeout-minutes: 75
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+        python-version: [3.12, 3.13, 3.14]
+    runs-on: ${{ matrix.platform }}
+    env:
+      UV_LINK_MODE: copy
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: |
+          pipx install uv
+          pipx install maturin
+
+      - name: Fable Library - Python (linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: ./build.sh fable-library --python
+
+      - name: Fable Library - Python (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: .\build.bat fable-library --python
+
+      - name: Fable Tests - Python (linux)
+        if: matrix.platform == 'ubuntu-latest'
+        run: ./build.sh test python
+
+      - name: Fable Tests - Python (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: .\build.bat test python
+
+  # Separate build job for Rust (will run in parallel)
+  build-rust:
+    timeout-minutes: 75
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test: ["default", "no_std", "threaded"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v5
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Fable Library - Rust
+        run: ./build.sh fable-library --rust
+
+      - name: Fable Tests - Rust
+        run: ./build.sh test rust --${{ matrix.test }}
+
+  # Separate build job for Dart
+  build-dart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Dart SDK
+        uses: dart-lang/setup-dart@v1
+
+      - name: Fable Tests - Dart
+        run: ./build.sh test dart
+
+  # Separate build job for Beam (Erlang)
+  build-beam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Setup Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          rebar3-version: "3"
+
+      - name: Fable Tests - Beam
+        run: ./build.sh test beam
+
+  # Separate job to run F# analyzers
+  analyzers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      matrix:
+        project:
+          [
+            "src/Fable.AST/Fable.AST.fsproj",
+            "src/Fable.Transforms/Rust/AST/Rust.AST.fsproj",
+            "src/Fable.Transforms/Fable.Transforms.fsproj",
+            "src/Fable.Compiler/Fable.Compiler.fsproj",
+          ]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Build solution
+        run: dotnet build -c Release Fable.sln
+
+      - name: Run analyzers for ${{ matrix.project }}
+        run: dotnet msbuild /t:AnalyzeFSharpProject ${{ matrix.project }}
+        continue-on-error: true
+
+      - name: Upload SARIF files
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: src/reports
+          category: ${{ matrix.project }}

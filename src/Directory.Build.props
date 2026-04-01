@@ -2,9 +2,39 @@
     <PropertyGroup>
         <PackageProjectUrl>http://fable.io</PackageProjectUrl>
         <RepositoryUrl>https://github.com/fable-compiler/Fable.git</RepositoryUrl>
-        <PackageLicenseUrl>https://raw.githubusercontent.com/fable-compiler/Fable/master/LICENSE</PackageLicenseUrl>
-        <PackageIconUrl>https://raw.githubusercontent.com/fable-compiler/Fable/master/docs/img/fable_logo.png</PackageIconUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>fable_logo.png</PackageIcon>
         <PackageTags>fsharp;fable;javascript;f#;js</PackageTags>
         <Authors>Alfonso García-Caro Núñez</Authors>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+        <!-- Symbols are giving errors when publishing, skip for now -->
+        <!-- For SourceLink. See: https://github.com/dotnet/sourcelink#using-source-link-in-net-projects -->
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <OtherFlags>$(OtherFlags) --test:GraphBasedChecking --test:ParallelOptimization --test:ParallelIlxGen --realsig+</OtherFlags>
     </PropertyGroup>
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)\..\fable_logo.png" Pack="true" Visible="false" PackagePath="" />
+        <None Include="$(MSBuildThisFileDirectory)\..\LICENSE" Pack="true" Visible="false" PackagePath=""/>
+        <None Include="$(MSBuildThisFileDirectory)\..\README.md" Pack="true" PackagePath="\"/>
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.103" PrivateAssets="All" />
+        <PackageReference Include="FSharp.Analyzers.Build" Version="0.5.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>build</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="G-Research.FSharp.Analyzers" Version="0.22.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>analyzers</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Ionide.Analyzers" Version="0.15.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>analyzers</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
 </Project>

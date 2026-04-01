@@ -14,6 +14,18 @@ let resources =
       ( "ConstraintSolverMissingConstraint",
         "A type parameter is missing a constraint '{0}'"
       );
+      ( "ConstraintSolverNullnessWarningEquivWithTypes",
+        "Nullness warning: A non-nullable '{0}' was expected but this expression is nullable. Consider either changing the target to also be nullable, or use pattern matching to safely handle the null case of this expression."
+      );
+      ( "ConstraintSolverNullnessWarningWithTypes",
+        "Nullness warning: The types '{0}' and '{1}' do not have compatible nullability."
+      );
+      ( "ConstraintSolverNullnessWarningWithType",
+        "Nullness warning: The type '{0}' does not support 'null'."
+      );
+      ( "ConstraintSolverNullnessWarning",
+        "Nullness warning: {0}."
+      );
       ( "ConstraintSolverTypesNotInEqualityRelation1",
         "The unit of measure '{0}' does not match the unit of measure '{1}'"
       );
@@ -39,16 +51,10 @@ let resources =
         "Type constraint mismatch. The type \n    '{0}'    \nis not compatible with type\n    '{1}'    {2}\n"
       );
       ( "UpperCaseIdentifierInPattern",
-        "Uppercase variable identifiers should not generally be used in patterns, and may indicate a misspelt pattern name."
+        "Uppercase variable identifiers should not generally be used in patterns, and may indicate a missing open declaration or a misspelt pattern name."
       );
       ( "NotUpperCaseConstructor",
         "Discriminated union cases and exception labels must be uppercase identifiers"
-      );
-      ( "PossibleOverload",
-        "Possible overload: '{0}'. {1}."
-      );
-      ( "PossibleBestOverload",
-        "\n\nPossible best overload: '{0}'."
       );
       ( "FunctionExpected",
         "This function takes too many arguments, or is used in a context where a function is not expected"
@@ -75,7 +81,7 @@ let resources =
         "Duplicate definition of {0} '{1}'"
       );
       ( "NameClash2",
-        "The {0} '{1}' can not be defined because the name '{2}' clashes with the {3} '{4}' in this type or module"
+        "The {0} '{1}' cannot be defined because the name '{2}' clashes with the {3} '{4}' in this type or module"
       );
       ( "Duplicate1",
         "Two members called '{0}' have the same signature"
@@ -111,7 +117,7 @@ let resources =
         "A coercion from the value type \n    {0}    \nto the type \n    {1}    \nwill involve boxing. Consider using 'box' instead"
       );
       ( "TypeIsImplicitlyAbstract",
-        "This type is 'abstract' since some abstract members have not been given an implementation. If this is intentional then add the '[<AbstractClass>]' attribute to your type."
+        "Non-abstract classes cannot contain abstract members. Either provide a default member implementation or add the '[<AbstractClass>]' attribute to your type."
       );
       ( "NonRigidTypar1",
         "This construct causes code to be less generic than indicated by its type annotations. The type variable implied by the use of a '#', '_' or other type annotation at or near '{0}' has been constrained to be type '{1}'."
@@ -212,6 +218,9 @@ let resources =
       ( "Parser.TOKEN.DOT.DOT",
         "symbol '..'"
       );
+      ( "Parser.TOKEN.DOT.DOT.HAT",
+        "symbol '..^'"
+      );
       ( "Parser.TOKEN.QUOTE",
         "quote symbol"
       );
@@ -233,6 +242,12 @@ let resources =
       ( "Parser.TOKEN.EQUALS",
         "symbol '='"
       );
+      ( "Parser.TOKEN.GREATER.BAR.RBRACE",
+        "symbol '>|}'"
+      );  
+      ( "Parser.TOKEN.RQUOTE.BAR.RBRACE",
+        "symbol '@>|}' or '@@>|}'"
+      );  
       ( "Parser.TOKEN.GREATER.BAR.RBRACK",
         "symbol '>|]'"
       );
@@ -302,6 +317,9 @@ let resources =
       ( "Parser.TOKEN.BAR.RBRACE",
         "symbol '|}'"
       );
+      ( "Parser.TOKEN.BAR_JUST_BEFORE_NULL",
+        "symbol '|' (directly before 'null')"
+      );
       ( "Parser.TOKEN.GREATER.RBRACE",
         "symbol '>}'"
       );
@@ -328,6 +346,18 @@ let resources =
       );
       ( "Parser.TOKEN.FIXED",
         "keyword 'fixed'"
+      );
+      ( "Parser.TOKEN.INTERP.STRING.BEGIN.END",
+        "interpolated string"
+      );
+      ( "Parser.TOKEN.INTERP.STRING.BEGIN.PART",
+        "interpolated string (first part)"
+      );
+      ( "Parser.TOKEN.INTERP.STRING.PART",
+        "interpolated string (part)"
+      );
+      ( "Parser.TOKEN.INTERP.STRING.END",
+        "interpolated string (final part)"
       );
       ( "Parser.TOKEN.CONSTRAINT",
         "keyword 'constraint'"
@@ -448,6 +478,9 @@ let resources =
       );
       ( "Parser.TOKEN.AND",
         "keyword 'and'"
+      );
+      ( "Parser.TOKEN.AND.BANG",
+        "keyword 'and!'"
       );
       ( "Parser.TOKEN.AS",
         "keyword 'as'"
@@ -755,6 +788,12 @@ let resources =
       ( "OverrideDoesntOverride4",
         "The member '{0}' is specialized with 'unit' but 'unit' can't be used as return type of an abstract method parameterized on return type."
       );
+      ( "OverrideShouldBeStatic",
+        " Static member is expected."
+      );
+      ( "OverrideShouldBeInstance",
+        " Non-static member is expected."
+      );
       ( "UnionCaseWrongArguments",
         "This constructor is applied to {0} argument(s) but expects {1}"
       );
@@ -881,8 +920,14 @@ let resources =
       ( "Obsolete2",
         ". {0}"
       );
-      ( "Experimental",
-        "{0}. This warning can be disabled using '--nowarn:57' or '#nowarn \"57\"'."
+      ( "Experimental1",
+        "This construct is experimental"
+      );
+      ( "Experimental2",
+        ". {0}"
+      );
+      ( "Experimental3",
+        ". This warning can be disabled using '--nowarn:57' or '#nowarn \"57\"'."
       );
       ( "PossibleUnverifiableCode",
         "Uses of this construct may result in the generation of unverifiable .NET IL code. This warning can be disabled using '--nowarn:9' or '#nowarn \"9\"'."
@@ -896,20 +941,11 @@ let resources =
       ( "MissingFields",
         "The following fields require values: {0}"
       );
-      ( "ValueRestriction1",
-        "Value restriction. The value '{0}' has generic type\n    {1}    \nEither make the arguments to '{2}' explicit or, if you do not intend for it to be generic, add a type annotation."
+      ( "ValueRestrictionFunction",
+        """Value restriction: The value '{0}' has an inferred generic function type\n    {1}\nHowever, values cannot have generic type variables like '_a in "let f: '_a". You should define '{2}' as a function instead by doing one of the following:\n- Add an explicit parameter that is applied instead of using a partial application "let f param"\n- Add a unit parameter like "let f()"\n- Write explicit type parameters like "let f<'a>"\nor if you do not intend for it to be generic, either:\n- Add an explicit type annotation like "let f : obj -> obj"\n- Apply arguments of non-generic types to the function value in later code for type inference like "do f()".\nThis error is because a let binding without parameters defines a value, not a function. Values cannot be generic because reading a value is assumed to result in the same everywhere but generic type parameters may invalidate this assumption by enabling type-dependent results."""
       );
-      ( "ValueRestriction2",
-        "Value restriction. The value '{0}' has generic type\n    {1}    \nEither make '{2}' into a function with explicit arguments or, if you do not intend for it to be generic, add a type annotation."
-      );
-      ( "ValueRestriction3",
-        "Value restriction. This member has been inferred to have generic type\n    {0}    \nConstructors and property getters/setters cannot be more generic than the enclosing type.  Add a type annotation to indicate the exact types involved."
-      );
-      ( "ValueRestriction4",
-        "Value restriction. The value '{0}' has been inferred to have generic type\n    {1}    \nEither make the arguments to '{2}' explicit or, if you do not intend for it to be generic, add a type annotation."
-      );
-      ( "ValueRestriction5",
-        "Value restriction. The value '{0}' has been inferred to have generic type\n    {1}    \nEither define '{2}' as a simple data term, make it a function with explicit arguments or, if you do not intend for it to be generic, add a type annotation."
+      ( "ValueRestriction",
+        """Value restriction: The value '{0}' has an inferred generic type\n    {1}\nHowever, values cannot have generic type variables like '_a in "let x: '_a". You can do one of the following:\n- Define it as a simple data term like an integer literal, a string literal or a union case like "let x = 1"\n- Add an explicit type annotation like "let x : int"\n- Use the value as a non-generic type in later code for type inference like "do x"\nor if you still want type-dependent results, you can define '{2}' as a function instead by doing either:\n- Add a unit parameter like "let x()"\n- Write explicit type parameters like "let x<'a>".\nThis error is because a let binding without parameters defines a value, not a function. Values cannot be generic because reading a value is assumed to result in the same everywhere but generic type parameters may invalidate this assumption by enabling type-dependent results."""
       );
       ( "RecoverableParseError",
         "syntax error"
@@ -927,7 +963,7 @@ let resources =
         "Override implementations should be given as part of the initial declaration of a type."
       );
       ( "IntfImplInIntrinsicAugmentation",
-        "Interface implementations in augmentations are now deprecated. Interface implementations should be given on the initial declaration of a type."
+        "Interface implementations should normally be given on the initial declaration of a type. Interface implementations in augmentations may lead to accessing static bindings before they are initialized, though only if the interface implementation is invoked during initialization of the static data, and in turn access the static data. You may remove this warning using '#nowarn \"69\"' if you have checked this is not the case."
       );
       ( "IntfImplInExtrinsicAugmentation",
         "Interface implementations should be given on the initial declaration of a type."
@@ -939,10 +975,10 @@ let resources =
         "The type referenced through '{0}' is defined in an assembly that is not referenced. You must add a reference to assembly '{1}'."
       );
       ( "HashIncludeNotAllowedInNonScript",
-        "#I directives may only occur in F# script files (extensions .fsx or .fsscript). Either move this code to a script file, add a '-I' compiler option for this reference or delimit the directive with delimit it with '#if INTERACTIVE'/'#endif'."
+        "#I directives may only be used in F# script files (extensions .fsx or .fsscript). Either move this code to a script file, add a '-I' compiler option for this reference or delimit the directive with delimit it with '#if INTERACTIVE'/'#endif'."
       );
       ( "HashReferenceNotAllowedInNonScript",
-        "#r directives may only occur in F# script files (extensions .fsx or .fsscript). Either move this code to a script file or replace this reference with the '-r' compiler option. If this directive is being executed as user input, you may delimit it with '#if INTERACTIVE'/'#endif'."
+        "#r directives may only be used in F# script files (extensions .fsx or .fsscript). Either move this code to a script file or replace this reference with the '-r' compiler option. If this directive is being executed as user input, you may delimit it with '#if INTERACTIVE'/'#endif'."
       );
       ( "HashDirectiveNotAllowedInNonScript",
         "This directive may only be used in F# script files (extensions .fsx or .fsscript). Either remove the directive, move this code to a script file or delimit the directive with '#if INTERACTIVE'/'#endif'."
@@ -952,6 +988,9 @@ let resources =
       );
       ( "AssemblyNotResolved",
         "Assembly reference '{0}' was not found or is invalid"
+      );
+      ( "HashLoadedSourceHasIssues0",
+        "One or more informational messages in loaded file.\n"
       );
       ( "HashLoadedSourceHasIssues1",
         "One or more warnings in loaded file.\n"
@@ -976,5 +1015,29 @@ let resources =
       );
       ( "TargetInvocationExceptionWrapper",
         "internal error: {0}"
+      );
+      ( "NotUpperCaseConstructorWithoutRQA",
+        "Lowercase discriminated union cases are only allowed when using RequireQualifiedAccess attribute"
+      );
+      ( "ErrorFromAddingTypeEquationTuples",
+        "Type mismatch. Expecting a tuple of length {0} of type\n    {1}    \nbut given a tuple of length {2} of type\n    {3}    {4}\n"
+      );
+      ( "ArgumentsInSigAndImplMismatch",
+        "The argument names in the signature '{0}' and implementation '{1}' do not match. The argument name from the signature file will be used. This may cause problems when debugging or profiling."
+      );
+      ( "DefinitionsInSigAndImplNotCompatibleAbbreviationsDiffer",
+        "The {0} definitions for type '{1}' in the signature and implementation are not compatible because the abbreviations differ:\n    {2}\nversus\n    {3}"
+      );
+      ( "Parser.TOKEN.WHILE.BANG",
+        "keyword 'while!'"
+      );
+      ( "InvalidAttributeTargetForLanguageElement1",
+        "This attribute cannot be applied to {0}. Valid targets are: {1}"
+      );
+      ( "InvalidAttributeTargetForLanguageElement2",
+        "This attribute is not valid for use on this language element"
+      );
+      ( "NoConstructorsAvailableForType",
+        "No constructors are available for the type '{0}'"
       );
     ]

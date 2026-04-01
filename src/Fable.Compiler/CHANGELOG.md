@@ -1,0 +1,585 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Unreleased
+
+## 5.0.0-rc.12 - 2026-03-31
+
+### Fixed
+
+* [Dart] Enable explicit variable typing for more data types (by @ncave)
+* [Dart] Fix tests for `round`, `sign`, `truncate`, `log`, `log2`, `log10`, `pow`, `DivRem`, `Min`, `Max`, `Clamp`, `MinMagnitude`, `MaxMagnitude`, `cosh`, `sinh`, `tanh`, and float `Parse` (by @ncave)
+* [Python] Add `Math.DivRem` support for int, int64, and bigint (by @dbrattli)
+* [Python] Fix modulo with negative numbers using Python floored semantics instead of .NET truncated semantics for bigint (fixes #4462) (by @dbrattli)
+* [Beam] Fix `System.String.Concat` with 4+ arguments not being supported (by @dbrattli)
+* [TS/Python] Fix thisArg type for overloads in structs (#4453) (by @ncave)
+* [TS/Python] Fix invalid `this` argument type in structs (#4453) (by @ncave)
+* [JS/TS] Fix `N` format specifier (`ToString("N0")`, `String.Format("{0:N0}", ...)`) producing a trailing dot when precision is 0 (fix #2582) (by @MangelMaxime)
+* [JS/TS] Fix `C0` and `P0` format specifiers producing trailing dot (e.g., `"¤1,000."` → `"¤1,000"`) (by @MangelMaxime)
+* [All] Fix captured side-effect-free values (e.g. empty ResizeArray) being incorrectly inlined into object expression getters in release mode, causing a new instance to be created on each getter call (fixes #3779) (by @MangelMaxime)
+* [Python] Fix missing `await` on else branch of ternary expressions in async closures (by @dbrattli)
+* [Beam] Fix `|> ignore` on cross-module Emit calls generating variable bindings that shadow Emit case-clause variables (by @dbrattli)
+* [Beam] Fix `containsIdentRef` not checking `Call` ThisArg (by @dbrattli)
+* [JS/TS] `StringEnum` now respect `CompiledValue` and `CompiledName` (by @shayanhabibi)
+* [JS/TS] Fix invalid syntax emitted when negating negative literals (fix #4251) (by @MangelMaxime)
+* [Rust] Fix negative counting in CallInfo.GenericArgs (by @ncave)
+* [Rust] Fix inline bindings and captured idents tracking (by @ncave)
+* [Rust] Fix `return!` in async computation expressions so inner async workflows are returned and awaited correctly (by @mizzle-mo)
+* [JS/TS] Improve `Regex.Escape` and `Regex.Unescape` handling (by @MangelMaxime)
+* [All] Fix allow plugins to target .NET6 target framework (by @MangelMaxime)
+* [Python] Fix function references passed as arguments inside tail-call optimised functions gaining unnecessary default parameters for outer TCO variables they don't reference (fix #3877)
+* [TS] Fix abstract instance methods not emitted in TypeScript when class uses `[<AttachMembers>]` (fixes #3506) (by @MangelMaxime)
+* [JS/TS] Fix `Unchecked.defaultof<'T>` for struct types with fields returning `undefined` instead of zero-initialized values (by @MangelMaxime)
+* [JS/TS] Fixed quotation for union string cases (by @MangelMaxime)
+* [Python] Fix `Unchecked.defaultof<'T>` for struct types with fields returning incorrect values instead of zero-initialized instances (by @MangelMaxime)
+* [Python] Fix `Unchecked.defaultof<char>` returning `""` (empty string) instead of `"\u0000"` (null character) (by @MangelMaxime)
+* [Python] Improve `Unchecked.defaultof<_>` for declared entities (by @MangelMaxime)
+
+## 5.0.0-rc.11 - 2026-03-20
+
+### Added
+
+[All] Add support for `[<InlineIfLambda>]` (by @MangelMaxime)
+
+## 5.0.0-rc.10 - 2026-03-19
+
+### Fixed
+
+* [JS/TS] Fix `Array.zeroCreate` producing `null` for user-defined struct (value type) elements instead of a default-initialized instance (by @MangelMaxime)
+* [All] Fix interpolated string holes missing format specifiers in State.fs and Python/Replacements.fs (code scanning alerts 1144, 1145, 1512)
+* [Rust] Replace unsafe `.IsSome && .Value` option pattern with `Option.exists` in Fable2Rust.fs (code scanning alert 1125)
+* [JS/TS] Fix `Unchecked.defaultof<char>` being emitted as `null` instead of `'\0'` (by @MangelMaxime)
+* [JS/TS] Fix `static val mutable` fields declared with `[<DefaultValue>]` not being zero-initialized (fix #2739) (by @MangelMaxime)
+* [JS/TS/Python] Fix record/struct types augmented with `static let` or `static member val` generating extra constructor parameters for each static field, causing constructor arguments to be assigned to wrong slots (by @MangelMaxime)
+* [TS] Annotate `System.Collections.Generic.IList<T>` as `MutableArray<T>` (by @MangelMaxime)
+* [JS/TS] Fix `ResizeArray` index getter/setter not throwing `IndexOutOfRangeException` when index is out of bounds (fix #3812) (by @MangelMaxime)
+* [Beam] Fix unused term warning in try/catch when exception variable is not referenced (by @dbrattli)
+* [Beam] Fix "no effect" warning for pure BIF calls (`self/0`, `node/0`) in non-final block positions (by @dbrattli)
+* [Beam] Fix `reraise()` generating unbound `MatchValue` variable — use raw Erlang reason variable for re-throw (by @dbrattli)
+* [Beam] Fix `Erlang.receive<'T>()` resolving to timeout overload due to F# unit argument (by @dbrattli)
+* [JS/TS] Generate comments for members in class decorated with `[<AttachMembers>]` (by @MangelMaxime)
+* [Beam] Fix `[<ImportAll>]` generating invalid `module:*()` Erlang code when binding is used as a value (by @dbrattli)
+* [Beam] Fix string slicing and `Substring` with compound expressions producing wrong `binary:part` length due to missing parentheses in emitted Erlang (by @dbrattli)
+* [Beam] Fix non-ASCII characters in string literals being truncated to single bytes — emit `<<"..."/utf8>>` instead of `<<"...">>` (by @dbrattli)
+* [Beam] Fix `Emit` expressions with `case` leaking variables into surrounding scope — auto-wrap in IIFE for scope isolation (by @dbrattli)
+
+## 5.0.0-rc.10 - 2026-03-10
+
+### Added
+
+* [Beam] Support `[<ImportAll>]` + `[<Erase>]` interface pattern for typed FFI bindings (by @dbrattli)
+
+### Fixed
+
+* [Beam] Fix dropped top-level side effects — multiple `ActionDeclaration` `main/0` functions are now merged (by @dbrattli)
+* [Beam] Fix `%%` escape in string interpolation producing double `%` instead of single (by @dbrattli)
+* [Beam] Fix double-quoted atoms for uppercase `CompiledName` on DU cases (e.g. `''EXIT''` → `'EXIT'`) (by @dbrattli)
+* [Beam] Fix cross-project imports producing self-recursive calls when source files share the same name (by @dbrattli)
+* [Beam] Support `Type.GetGenericArguments` and `Type.GetInterface` for reflection (by @dbrattli)
+* [TS] Correctly resolve type references for `TypeScriptTaggedUnion` (by @MangelMaxime and @jrwone0)
+* [Python] Fix `nonlocal`/`global` declarations generated inside `match/case` bodies causing `SyntaxError` (by @dbrattli)
+* [Python] Fix exception variable captured in deferred closures causing `NameError` (PEP 3110 scoping) (by @dbrattli)
+* [JS/TS] Support format specifiers and single hole in JSX string templates (by @MangelMaxime)
+* [All] Fix generic parameter resolution in inline functions with static member constraints (by @Programmerino and @MangelMaxime)
+
+## 5.0.0-rc.2 - 2026-03-03
+
+### Added
+
+* [Beam] Add arithmetic tests and support for DivRem, MinMagnitude, MaxMagnitude, Decimal rounding, BigInt.Log (by @dbrattli)
+* [Beam] Add `fable_random.erl` and fix Random seeded/NextBytes tests (by @dbrattli)
+
+### Fixed
+
+* [Python] Fix `__hash__` to return native `int` instead of `int32` for Python 3.14 compatibility (by @dbrattli)
+* [Beam] Fix optional arguments by unwrapping at call sites and padding missing trailing args (by @dbrattli)
+* [Beam] Fix generic constraint interface dispatch (by @dbrattli)
+* [Beam] Fix class constructor field invokes and explicit val fields (by @dbrattli)
+* [Beam] Fix mutable record field mutation (by @dbrattli)
+
+## 5.0.0-rc.1 - 2026-02-26
+
+### Added
+
+* [Beam] Add Erlang/BEAM compilation support: Fable2Beam transform, Beam Replacements, ErlangPrinter, and 31 runtime `.erl` modules. 2086 tests passing. (by @dbrattli)
+
+### Fixed
+
+* [Beam] Fix object expression self-references, constructor `as self` patterns, and property get/set key collisions in object expressions (by @dbrattli)
+* [Python] Fix type var scoping for PEP 695 annotations: emit `Any` for type vars outside function scope and prevent non-repeated generic params from leaking into `ScopedTypeParams` (by @dbrattli)
+* [JS/TS] Ignore extra args in FSharpType functions (by @olivercoad)
+
+## 5.0.0-alpha.23 - 2026-02-13
+
+### Fixed
+
+* [Python] Fix HashSet operations (Count, Contains, Remove, UnionWith, IntersectWith, ExceptWith) to work with both native Python sets and custom MutableSet (by @dbrattli)
+* [Python] Fix `Array.length`, `.Length`, `Array.isEmpty`, and `ResizeArray.Count` to use `len()` instead of `.length` property for plain Python list interop (by @dbrattli)
+* [Python] Fix `Task<T>` pass-through returns not being awaited in if/else and try/with branches (by @dbrattli)
+* [Python] Fix `:? T as x` type test pattern in closures causing `UnboundLocalError` due to `cast()` shadowing outer variable (by @dbrattli)
+
+## 5.0.0-alpha.22 - 2026-02-03
+
+### Changed
+
+* [Python] Changed DU representation to use separate classes for each case (by @dbrattli)
+* [Python] Fable will no longer auto-generate `__str__` or `__hash__` for custom types. Use the `Py.Stringable` and `Py.Hashable` marker interfaces to generate these methods (by @dbrattli)
+
+### Added
+
+* [Python] Added ABC base classes for F# types and Py marker interfaces for Python interop (by @dbrattli)
+* [Python] Add tuple pattern matching with guards and improve match statement generation (by @dbrattli)
+* [Python] Add Python 3.10+ match statement support for pattern matching (by @dbrattli)
+
+### Fixed
+
+* [Python] Fix curry/uncurry to handle arbitrary number of arguments (by @dbrattli)
+* [Python] Fix type annotations for protocols, Option casting, and abstract classes (by @dbrattli)
+* [Python] Fix type annotations for curried functions and numeric types (by @dbrattli)
+* [Python] Fix type annotations for inref, IList, DateKind, and regex collections (by @dbrattli)
+* [Python] Fix type annotations for protocols, ABCs, Atom, and Set module (by @dbrattli)
+* [Python] Fix type annotations for async functions, date operations, and None handling (by @dbrattli)
+* [Python] Fix type annotations for tuple indexing, generic defaults, and reflection (by @dbrattli)
+* [All] Fix `StringBuilder.Chars` getter and setter (by @MangelMaxime)
+
+## 5.0.0-alpha.21 - 2025-12-26
+
+### Fixed
+
+* [Python] Use Fable AST for type parameter extraction instead of Python AST heuristics (by @dbrattli)
+* [Python] Fix library type stubs for parse_int32/64 and from_integer (by @dbrattli)
+* [Python] Fix missing type parameters on generic methods (by @dbrattli)
+* [JS/TS] Fix #4305 DateTimeOffset.Now returns wrong time (by @ncave)
+
+## 5.0.0-alpha.20 - 2025-12-15
+
+### Added
+
+* [Python] Support catching Python `BaseException` subclasses (`KeyboardInterrupt`, `SystemExit`, `GeneratorExit`) for Python interop (by @dbrattli)
+
+### Changed
+
+* [Python] F# `task { }` expressions now generate Python `async def` functions (by @dbrattli)
+* [Python] Generate idiomatic `except` clauses for typed exception patterns (by @dbrattli)
+
+### Fixed
+
+* [Python] Fix `ResizeArray` compatibility with `Seq`/`Array` functions (by @dbrattli)
+* [Python] Fix `FSharpList` generic type parameter handling for `IEnumerable_1` compatibility (by @dbrattli)
+
+## 5.0.0-alpha.19 - 2025-12-08
+
+### Added
+
+* [Python] Add `Array.skipWhile` support (by @dbrattli)
+* [Python] Add `Array.takeWhile` support (by @dbrattli)
+* [Python] Allow `IEnumerator_1` as base class to fix typing issues (by @dbrattli)
+* [Python] Add Pythonic import path syntax for relative imports (`.module`, `..parent`, `...grandparent`) (by @dbrattli)
+* [Python] Add `[<Py.DecorateTemplate>]` attribute for creating custom decorator attributes (by @dbrattli)
+* [Python] Add `[<Py.ClassAttributesTemplate>]` attribute for creating custom class attribute shortcuts (by @dbrattli)
+* [Python] Add `[<Py.DataClass>]` as a built-in shorthand for `[<Py.ClassAttributes(style = Attributes, init = false)>]` (by @dbrattli)
+
+### Fixed
+
+* [Python] Fix String.Concat spread operator issue in Python transpilation (by @dbrattli)
+* [Python] Fix regression `[<Erase>]` on class types not preventing them from being emitted to Python (by @dbrattli)
+* [Python] Fix regression `%A` format specifier to output booleans as lowercase `true`/`false` (by @dbrattli)
+* [Python] Fix various bugs in fable-library numeric types and string operations (by @dbrattli)
+
+### Changed
+
+* [Python] `[<Py.Decorate>]` now emits decorator strings verbatim and adds `importFrom` parameter for explicit import control (by @dbrattli)
+
+## 5.0.0-alpha.18 - 2025-12-04
+
+### Fixed
+
+* [Python] Fix `printf.cont()` not applying continuation function when currying (by @dbrattli)
+
+### Added
+
+* [Python] Add support for `[<Py.Decorate>]` attribute on methods (previously only worked on classes) (by @dbrattli)
+* [Python] Add new `[<Py.ClassMethod>]` attribute to emit @classmethod instead of @staticmethod (by @dbrattli)
+* [Python] Added support for Pydantic serialization of core numeric and array types (by @dbrattli)
+
+## 5.0.0-alpha.17 - 2025-12-03
+
+### Fixed
+
+* [Python] Fix regression, record member method naming (by @dbrattli)
+* [Python] Fix regression, named arguments not being converted to snake_case (by @dbrattli)
+* [Python] Fix regression, erased interfaces should not generate code (#4277) (by @dbrattli)
+
+### Changed
+
+* [Rust] Update `fable-library-rust` dependencies (by @ncave)
+* [All] Update TargetFramework to net10.0 (by @ncave)
+* [All] Update FCS to latest (commit [cfda5f6](https://github.com/dotnet/fsharp/commits/cfda5f68f781f1b336b7d6c1689d69f2c34da751/)) (by @ncave)
+
+## 5.0.0-alpha.16 - 2025-11-27
+
+### Fixed
+
+* [All] Fix quoted paths resolution by `Util.getExactFullPath` (by @MangelMaxime)
+
+### Changed
+
+* [All] Invoke MSBuild from Fable current working directory (by @cr3wdayt5p)
+* [Python] fable-library for Python is now distributed via PyPI instead of being bundled in the NuGet package (by @dbrattli)
+
+## 5.0.0-alpha.15 - 2025-11-19
+
+### Added
+
+* [TS] Added support for `erasableSyntaxOnly` in TypeScript (by @ncave)
+* [All] Added some default `System` exception implementations (by @ncave)
+* [All] Added `ofOption`/`toOption`/`ofValueOption`/`toValueOption` (by @ncave)
+* [Python] Added `Decorate` attribute to add Python decorators to classes (by @dbrattli)
+* [Python] Added `ClassAttributes` attribute to control Python class generation (@dbrattli)
+* [Python] Added support for Python 3.14 (by @dbrattli)
+
+### Changed
+
+* [JS/TS] Replace the deprecated `substr` method with `slice` (by @Thorium)
+
+### Fixed
+
+* [TS] Fix ObjectExpr tests with multiple interfaces (by @ncave)
+* [TS] Fix ObjectExpr abstract base constructor type (by @ncave)
+* [JS/TS] Fix #4240 Missing DateTime constructor (by @ncave)
+* [PHP] Fix php import extensions (by @MangelMaxime)
+* [TS] Fix #3973 Typescript imports file extension (by @ncave)
+* [TS] Fix support for abstract classes and members (by @ncave)
+* [TS] Fix getters, setters, indexers in interfaces (by @ncave)
+* [TS] Enable typedArrays flag usage for TypeScript (by @ncave)
+* [All] Fix #4221 Fable.Type union case arg names (by @ncave)
+* [All] Erase Nullable Reference Types to inner type (by @ncave)
+* [Python] Improve Python (e.g. Pydantic) interop (by @dbrattli)
+* [JS/TS] Fix comparers for non-nullable types (by @ncave)
+* [Rust] Fix curried object expression getters (by @ncave)
+* [Rust] Fix compiler-generated generic args (by @ncave)
+* [All] Fixed #4041 missing unit argument (by @ncave)
+* [JS/TS/Python] Fixed eq comparer mangling (by @ncave)
+* [All] Fix all `BitConverter` return types (by @ncave)
+* [TS] Don't cast union case types to `any` (by @ncave)
+* [JS/TS] Fix Dictionary.ICollection.Remove (by @ncave)
+* [TS/Dart] Fixed optional parameter types (by @ncave)
+* [TS] Initialize un-initialized variables (by @ncave)
+* [JS/TS] Replace `Error` with `Exception` (by @ncave)
+* [All] Fix MSBuildResolver to include define when restoring the project (by @MangelMaxime)
+
+## 5.0.0-alpha.14 - 2025-07-25
+
+### Added
+
+* [Python] Support for Nullable Reference Types (by @dbrattli)
+* [JS/TS] Fix #3533: Add directives prologues supports (by @MangelMaxime)
+* [JS/TS] Support for Nullable Reference Types (by @ncave and @MangelMaxime)
+* [Rust] Initial support for Nullable Reference Types (by @ncave)
+
+### Changed
+
+* [Python] Use Python 3.12 type parameter syntax. Deprecate Python 3.10 and 3.11 (by @dbrattli)
+* [Python] Records now snake-cases all member fields (by @dbrattli)
+* [Python] Anonymous records now preserves the casing of member fields (by @dbrattli)
+* [Python] Option type is now `Option[T]` instead of `T | None` (by @dbrattli)
+* [Python] Use [uv](https://docs.astral.sh/uv/) instead of Poetry for package management (by @dbrattli)
+* [Python] Fable Library for Python is now partially written in Rust (by @dbrattli)
+* [All] Improve filewatcher error messages (by @goswinr)
+
+### Fixed
+
+* [Python] Fixed static properties and are now translated as Python class attributes (by @dbrattli)
+* [Python] Fixed DateTime with DateTimeKind generates proper enum reference (#3689) (by @dbrattli)
+* [Python] Fixed Dictionary KeyValuePair enumeration when casting to IEnumerable (#3771) (by @dbrattli)
+* [Python] Fixed `createEmpty<T>` for interfaces using `SimpleNamespace` with type casting (#3604) (by @dbrattli)
+* [Python] Fixed EmitMethod + ParamObject losing keyword arguments (#3871) (by @dbrattli)
+* [Python] Fixed EmitConstructor + ParamObject losing keyword arguments (#3871) (by @dbrattli)
+* [Python] Fixed DateTimeOffset.TryParse, ToString() and Offset property access (#3854) (by @dbrattli)
+* [Python] Fixed anonymous records in Maps causing comparison errors (#3869) (by @dbrattli)
+* [Python] Fixed handling of erased types for Python (#3968) (by @dbrattli)
+* [Python] Fixed unit function (zero arguments functions) are transpiled inconsistently (#4126) (by @dbrattli)
+* [Python] Fixed resource managers with empty body (#3912) (by @dbrattli)
+* [Python] Fixed `Async.Sleep`to handle TimeSpan correctly (#4137) (by @dbrattli)
+* [Python] Make sure snake-cased Record do not conflict (by @dbrattli)
+* [Python] Do not return None | None for optional unit types (#4127) (by @dbrattli)
+* [JS/TS] JSX : Alias `empty` CEs list to `null` when encountered in the `children` list (by @MangelMaxime)
+* [JS/TS] JSX : Allow usage of `unbox` when definining properties for `JSX.create` (by @MangelMaxime)
+
+## 5.0.0-alpha.13 - 2025-05-04
+
+### Fixed
+
+* [Python] Fixed testing with interfaces leads to incorrect pattern match (#3972) (by @dbrattli)
+* [Python] Fixed error when type contains multiple generic type parameters (#3986) (by @dbrattli)
+* [Python] Fixed import path handling for libraries (#4088) (by @dbrattli)
+* [Python] Reenable type aliasing for imports with name "*" (by @freymauer)
+* [JS/TS] Optimise JSX output in order to avoid F# list CEs to surface in it (by @MangelMaxime)
+
+### Removed
+
+* [All] Remove unused `Fable.Core` copy types from internal module (by @MangelMaxime)
+
+## 5.0.0-alpha.12 - 2025-03-14
+
+### Added
+
+* [Python] Add support for `nullArgCheck`(by @MangelMaxime)
+* [All] Add support for F# `nullness` (by @MangelMaxime)
+* [JS/TS] Add support for `Unchecked.nonNull` (by @MangelMaxime)
+* [All] Add support for `TreatWarningsAsErrors` (by @MangelMaxime)
+* [JS] Don't generate an import statement for pojos defined in another file (by @shayanhabibi)
+
+### Fixed
+
+* [JS/TS] Make `nullArgCheck` report the same error message as on .NET (by @MangelMaxime)
+* [TS] Sanitize DUs case names when generating constructor function (by @MangelMaxime)
+
+## 5.0.0-alpha.11 - 2025-03-03
+
+### Added
+
+* [JS/TS] Add support for `CaseRules.LowerAll` on `StringEnums` (by @shayanhabibi)
+* [Rust] Support Rust 2024 language edition (by @ncave)
+* [JS/TS] Add `C` and `c` format for numeric types (by @MangelMaxime)
+* [JS/TS] Add `B` and `b` format for numeric types (by @MangelMaxime)
+* [JS/TS] Add `n` format for numeric types (by @MangelMaxime)
+* [JS/TS] Generate compiler error when detecting an invalid/unsupported format specifier for numeric types (by @MangelMaxime)
+
+### Fixed
+
+* [JS/TS] Fix #4025: No reflection info for pojos (by @alfonsogarciacaro)
+* [JS/TS] Fix #4049: decimal/bigint to integer conversion checks (by @ncave)
+* [JS/TS] Fix `decimal` to `char` conversion checks (by @ManngelMaxime)
+* [JS/TS] Propagate non-captured exception when running `Async.Start` or `Async.StartImmediate` (by @MangelMaxime)
+* [JS/TS] Report an error at compilation time when trying to use `Async.RunSynchronously` (by @MangelMaxime)
+* [JS/TS] Fix short `DateTime` and `DateTimeOffset` short format strings (by @MangelMaxime)
+* [All] Don't scan system packages for plugins (by @MangelMaxime)
+* [JS/TS] Fix date formatting when repeating a format token more than the known format (example repeating 'd' more than 4 times) (by @MangelMaxime)
+* [Python] Fix date formatting when repeating a format token more than the known format (example repeating 'd' more than 4 times) (by @MangelMaxime)
+* [JS/TS] Fix #4010: Supports direct nested types when using `jsOptions` (by @MangelMaxime)
+
+    ```fs
+    let opts =
+        jsOptions<Level1> (fun o ->
+            o.level2.level3.valueA <- 10
+            o.level2.level3.valueB <- 20
+            o.topValueA <- 20
+        )
+    ```
+
+* [JS/TS] Fix numeric formats (by @MangelMaxime)
+
+### Changed
+
+* [JS/TS] Throw an error is an invalid Numeric format is provided (mimic .NET behavior) (by @MangelMaxime)
+
+## 5.0.0-alpha.10 - 2025-02-16
+
+### Added
+
+* [Python] - Print root module and module function comments (by @alfonsogarciacaro)
+* [Rust] Add support for module comments (by @ncave)
+* [Rust] Add support for null strings (by @ncave)
+* [TS/JS] `Pojo` attribute support (by @alfonsogarciacaro)
+
+### Fixed
+
+* [JS/TS] - Fix anonymous record printing (#4029) (by @alfonsogarciacaro)
+* [Python] - Fix #3998: PhysicalEquality (by @alfonsogarciacaro)
+* [Python] Resolve relative paths for non-qualified imports (#3481) (by @alfonsogarciacaro)
+* [Python] `importSideEffects` shouldn't generate identifier (#3965) (by @alfonsogarciacaro)
+* [JS/TS] Fix #4031: Hoist vars locally in for and while loops (@alfonsogarciacaro)
+
+### Changed
+
+* [JS/TS] In `JSX`, generate self closing element when element has no children (#4037) (by @shayanhabibi)
+
+## 5.0.0-alpha.9 - 2025-01-28
+
+### Fixed
+
+* [All] Add `--realsig+` to fix `Method not found: 'Boolean Fable.CompilerOptions.Equals` (by @nojaf)
+
+## 5.0.0-alpha.8 - 2025-01-27
+
+### Added
+
+* [TS] Include XML Doc comment on interface properties (by @Freymaurer)
+* [TS] Generate `interface` type when using the "ParamObject" class pattern (by @MangelMaxime)
+* [Rust] - Initial support for null values (by @ncave)
+
+## 5.0.0-alpha.7 - 2025-01-23
+
+### Fixed
+
+* [All] Disable .NET Welcome message when cracking project (#4014) (by @MangelMaxime)
+
+## 5.0.0-alpha.6 - 2025-01-23
+
+### Added
+
+* [All] Add `StringBuiler.Append(c: char, repeatCount: int)` overload (by @roboz0r)
+* [All] Added primitive types equality and comparison (by @ncave)
+* [All] Updated FCS to latest F# 9.0 (by @ncave)
+* [All] Updated Fable-FCS to latest F# 9.0 (by @ncave)
+* [All] Updated metadata to latest .NET 9.0 (by @ncave)
+* [All] Updated FCS type constraints (by @ncave)
+
+### Fixed
+
+* [Python] Add missing unicode categories in python library (by @joprice)
+* [All] Log JSON output if we fail to parse MSBuild result (by @MangelMaxime)
+
+## 5.0.0-alpha.5 - 2025-01-09
+
+### Added
+
+* [JS/TS/Python] Add new `TimeSpan` overloads support coming from .NET 9.0 (by @MangelMaxime)
+* [Rust] Add new `TimeSpan` overloads support coming from .NET 9.0 (by @ncave)
+
+### Fixed
+
+* [JS/TS] Fix `DateTimeOffset.ToLocalTime` (by @MangelMaxime)
+
+## 5.0.0-alpha.4 - 2025-01-03
+
+### Fixed
+
+* [TS] Make discriminated union `.Is*` properties works (@MangelMaxime)
+* [JS/TS/Python] Fix `h` in `DateTime.ToString` (@MangelMaxime)
+* [JS/TS] Fix `hh` in `DateTime.ToString` (@MangelMaxime)
+* [JS/TS] Don't generate the setter code if a property is decorated with `[<Erase>]` (@MangelMaxime)
+
+## 5.0.0-alpha.3 - 2024-12-18
+
+### Fixed
+
+* [Python] Fix type testing against `uint8`, `uint32`, `uint64`, `decimal` (@MangelMaxime)
+* [JS/TS] Workaround source map generation bug (deteriorate them a little) (@MangelMaxime)
+
+## 5.0.0-alpha.2 - 2024-11-25
+
+### Fixed
+
+* [All] Allow Fable 5 to be used with Fable 4 plugins (@ncave)
+
+## 5.0.0-alpha.1 - 2024-11-24
+
+### Added
+
+* [All] Add `--legacyCracker` as a fallback (@MangelMaxime)
+
+### Changed
+
+* [All] Make MSBuildCracker the default (@MangelMaxime)
+* [All] Replace `FABLE_COMPILER_4` with `FABLE_COMPILER_5` as the compiler directive (@MangelMaxime)
+* [All] Move TargetFramework to `net8.0` (@ncave)
+
+## 4.0.0-alpha-016 - 2024-11-19
+
+### Changed
+
+* Fable 4.24.0
+
+## 4.0.0-alpha-015 - 2024-10-28
+
+### Changed
+
+* Fable 4.23.0
+
+## 4.0.0-alpha-014 - 2024-10-02
+
+### Changed
+
+* Fable 4.22.0
+
+## 4.0.0-alpha-013 - 2024-09-19
+
+### Changed
+
+* [All] Don't hide original error when failing to scan an assembly for plugin (#3896) (by @MangelMaxime)
+
+## 4.0.0-alpha-012 - 2024-06-17
+
+### Fixed
+
+* [JS/TS] Fixed unwrapping optional arguments (#3847) (by @ncave)
+
+## 4.0.0-alpha-011 - 2024-06-13
+
+### Changed
+
+* Fable 4.19.1
+
+## 4.0.0-alpha-010 - 2024-05-24
+
+### Fixed
+
+* [GH-3835](https://github.com/fable-compiler/Fable/pull/3835) [All] Use case insensitive comparison when searching for dependencies between fable packages (by @ThisFunctionalTom)
+
+## 4.0.0-alpha-009 - 2024-05-24
+
+### Changed
+
+* Fable 4.18.0
+
+## 4.0.0-alpha-008 - 2024-02-27
+
+### Fixed
+
+* [GH-3769](https://github.com/fable-compiler/Fable/pull/3769) The dependent files of the current file should be detected for the signature file if there is one present. (by @nojaf)
+* [GH-3769](https://github.com/fable-compiler/Fable/pull/3769) Local plugin build does not run indefinably. (by @nojaf)
+
+## 4.0.0-alpha-007 - 2024-02-20
+
+### Added
+
+* [GH-3758](https://github.com/fable-compiler/Fable/pull/3758) Endpoint to get Fable.AST for a file. (by @nojaf)
+
+### Fixed
+
+* [GH-3763](https://github.com/fable-compiler/Fable/pull/3763) Redirect plugin build stdout and pass to logger. (by @nojaf)
+
+## 4.0.0-alpha-006 - 2024-02-12
+
+### Changed
+
+* Update to Fable.AST 4.4.0
+
+## 4.0.0-alpha-005 - 2024-02-12
+
+### Changed
+
+* [GH-3742](https://github.com/fable-compiler/Fable/pull/3742) Return diagnostics in compile response (by @nojaf)
+* [GH-3746](https://github.com/fable-compiler/Fable/pull/3746) Extract type-checking from compilation (by @nojaf)
+
+## 4.0.0-alpha-004 - 2024-01-30
+
+### Changed
+
+* [GH-3724](https://github.com/fable-compiler/Fable/pull/3724) Internalize `GetFableModulesFromDir` &amp; `GetFableModulesFromProject` (by @nojaf)
+
+## 4.0.0-alpha-003 - 2024-01-30
+
+* [GH-3720](https://github.com/fable-compiler/Fable/pull/3720) Introduce `ProjectCrackerResolver` allowing customizing the project resolution (by @nojaf)
+
+## 4.0.0-alpha-002 - 2024-01-25
+
+### Changed
+
+* Respect file extension from `CliArgs`
+* Use `Microsoft.Extensions.Logging`
+* Load Fable plugins
+
+## 4.0.0-alpha-001 - 2023-12-14
+
+* Initial release
+
+## 4.0.0-beta-001 - 2023-12-14 [YANKED]
+
+* Initial release

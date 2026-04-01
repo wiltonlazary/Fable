@@ -1,54 +1,39 @@
 // Copyright (c) Microsoft Corporation.  All Rights Reserved.  See License.txt in the project root for license information.
 
-// Open up the compiler as an incremental service for parsing,
-// type checking and intellisense-like environment-reporting.
-
 namespace FSharp.Compiler.SourceCodeServices
 
-open System
-open System.Collections.Generic
-open System.Collections.Concurrent
-open System.Diagnostics
-open System.IO
-open System.Reflection
-open System.Text
+open Internal.Utilities.Collections
+open Internal.Utilities.Library
+open Internal.Utilities.Library.Extras
 
-open Microsoft.FSharp.Core.Printf
-open FSharp.Compiler 
+open FSharp.Compiler
 open FSharp.Compiler.AbstractIL
 open FSharp.Compiler.AbstractIL.IL
 open FSharp.Compiler.AbstractIL.ILBinaryReader
-open FSharp.Compiler.AbstractIL.Diagnostics
-open FSharp.Compiler.AbstractIL.Internal  
-open FSharp.Compiler.AbstractIL.Internal.Library  
-
-open FSharp.Compiler.AccessibilityLogic
-open FSharp.Compiler.Ast
-open FSharp.Compiler.CompileOps
-open FSharp.Compiler.CompileOptions
-#if !FABLE_COMPILER
-open FSharp.Compiler.Driver
-#endif
-open FSharp.Compiler.ErrorLogger
-open FSharp.Compiler.Lib
-open FSharp.Compiler.PrettyNaming
-open FSharp.Compiler.Parser
-open FSharp.Compiler.Range
-open FSharp.Compiler.Lexhelp
-open FSharp.Compiler.Layout
-open FSharp.Compiler.Tast
-open FSharp.Compiler.Tastops
-open FSharp.Compiler.TcGlobals 
-open FSharp.Compiler.Infos
-open FSharp.Compiler.InfoReader
+open FSharp.Compiler.CodeAnalysis
+open FSharp.Compiler.CheckExpressions
+open FSharp.Compiler.CheckDeclarations
+open FSharp.Compiler.CompilerConfig
+open FSharp.Compiler.CompilerDiagnostics
+open FSharp.Compiler.CompilerGlobalState
+open FSharp.Compiler.CompilerImports
+open FSharp.Compiler.CompilerOptions
+open FSharp.Compiler.Diagnostics
+open FSharp.Compiler.DiagnosticsLogger
+open FSharp.Compiler.IO
 open FSharp.Compiler.NameResolution
-open FSharp.Compiler.TypeChecker
-open FSharp.Compiler.SourceCodeServices.SymbolHelpers 
-
-open Internal.Utilities
-open Internal.Utilities.Collections
-open FSharp.Compiler.Layout.TaggedTextOps
-
+open FSharp.Compiler.ParseAndCheckInputs
+open FSharp.Compiler.ScriptClosure
+open FSharp.Compiler.Symbols
+open FSharp.Compiler.Syntax
+open FSharp.Compiler.TcGlobals
+open FSharp.Compiler.Text
+open FSharp.Compiler.Text.Range
+open FSharp.Compiler.Tokenization
+open FSharp.Compiler.TypedTree
+open FSharp.Compiler.TypedTreeBasics
+open FSharp.Compiler.TypedTreeOps
+open FSharp.Compiler.TypedTreePickle
 
 //-------------------------------------------------------------------------
 // TcImports shim
@@ -58,43 +43,53 @@ module TcImports =
 
     let internal BuildTcImports (tcConfig: TcConfig, references: string[], readAllBytes: string -> byte[]) =
         let tcImports = TcImports ()
-        let ilGlobals = IL.EcmaMscorlibILGlobals
 
         let sigDataReaders ilModule =
-            [ for resource in ilModule.Resources.AsList do
-                if IsSignatureDataResource resource then 
-                    let _ccuName = GetSignatureDataResourceName resource
-                    yield resource.GetBytes() ]
+            ilModule.Resources.AsList()
+            |> GetResourceNameAndSignatureDataFuncs
+            |> List.map snd
 
         let optDataReaders ilModule =
-            [ for resource in ilModule.Resources.AsList do
-                if IsOptimizationDataResource resource then
-                    let _ccuName = GetOptimizationDataResourceName resource
-                    yield resource.GetBytes() ]
+            ilModule.Resources.AsList()
+            |> GetResourceNameAndOptimizationDataFuncs
+            |> List.map snd
 
         let LoadMod (ccuName: string) =
             let fileName =
-                if ccuName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                if ccuName.EndsWith(".dll", System.StringComparison.OrdinalIgnoreCase)
                 then ccuName
                 else ccuName + ".dll"
             let bytes = readAllBytes fileName
             let opts: ILReaderOptions =
-                  { ilGlobals = ilGlobals
-                    metadataOnly = MetadataOnlyFlag.Yes
+                  { metadataOnly = MetadataOnlyFlag.Yes
                     reduceMemoryUsage = ReduceMemoryFlag.Yes
                     pdbDirPath = None
                     tryGetMetadataSnapshot = (fun _ -> None) }
 
             let reader = ILBinaryReader.OpenILModuleReaderFromBytes fileName bytes opts
-            reader.ILModuleDef //reader.ILAssemblyRefs
+            reader.ILModuleDef //, reader.ILAssemblyRefs
 
-        let GetSignatureData (fileName:string, ilScopeRef, ilModule:ILModuleDef option, bytes:byte[]) = 
-            TastPickle.unpickleObjWithDanglingCcus fileName ilScopeRef ilModule TastPickle.unpickleCcuInfo bytes
+        let GetSignatureData (file, ilScopeRef, ilModule, byteReaderA, byteReaderB) : PickledDataWithReferences<PickledCcuInfo> =
+            let memA = byteReaderA ()
 
-        let GetOptimizationData (fileName:string, ilScopeRef, ilModule:ILModuleDef option, bytes:byte[]) = 
-            TastPickle.unpickleObjWithDanglingCcus fileName ilScopeRef ilModule Optimizer.u_CcuOptimizationInfo bytes
+            let memB =
+                (match byteReaderB with
+                | None -> ByteMemory.Empty.AsReadOnly()
+                | Some br -> br ())
 
-        let memoize_mod = new MemoizationTable<_,_> (LoadMod, keyComparer=HashIdentity.Structural)
+            unpickleObjWithDanglingCcus file ilScopeRef ilModule unpickleCcuInfo memA memB
+
+        let GetOptimizationData (file:string, ilScopeRef, ilModule, byteReaderA, byteReaderB) =
+            let memA = byteReaderA ()
+
+            let memB =
+                (match byteReaderB with
+                | None -> ByteMemory.Empty.AsReadOnly()
+                | Some br -> br ())
+
+            unpickleObjWithDanglingCcus file ilScopeRef ilModule Optimizer.u_CcuOptimizationInfo memA memB
+
+        let memoize_mod = MemoizationTable<_,_> ("mod", LoadMod, keyComparer=HashIdentity.Structural)
 
         let LoadSigData ccuName =
             let ilModule = memoize_mod.Apply ccuName
@@ -103,7 +98,7 @@ module TcImports =
             let fileName = ilModule.Name //TODO: try with ".sigdata" extension
             match sigDataReaders ilModule with
             | [] -> None
-            | bytes::_ -> Some (GetSignatureData (fileName, ilScopeRef, Some ilModule, bytes))
+            | (readerA, readerB)::_ -> Some (GetSignatureData (fileName, ilScopeRef, Some ilModule, readerA, readerB))
 
         let LoadOptData ccuName =
             let ilModule = memoize_mod.Apply ccuName
@@ -112,30 +107,30 @@ module TcImports =
             let fileName = ilModule.Name //TODO: try with ".optdata" extension
             match optDataReaders ilModule with
             | [] -> None
-            | bytes::_ -> Some (GetOptimizationData (fileName, ilScopeRef, Some ilModule, bytes))
+            | (readerA, readerB)::_ -> Some (GetOptimizationData (fileName, ilScopeRef, Some ilModule, readerA, readerB))
 
-        let memoize_sig = new MemoizationTable<_,_> (LoadSigData, keyComparer=HashIdentity.Structural)
-        let memoize_opt = new MemoizationTable<_,_> (LoadOptData, keyComparer=HashIdentity.Structural)
+        let memoize_sig = MemoizationTable<_,_> ("sig", LoadSigData, keyComparer=HashIdentity.Structural)
+        let memoize_opt = MemoizationTable<_,_> ("opt", LoadOptData, keyComparer=HashIdentity.Structural)
 
-        let GetCustomAttributesOfIlModule (ilModule: ILModuleDef) = 
-            (match ilModule.Manifest with Some m -> m.CustomAttrs | None -> ilModule.CustomAttrs).AsList 
+        let GetCustomAttributesOfILModule (ilModule: ILModuleDef) =
+            (match ilModule.Manifest with Some m -> m.CustomAttrs | None -> ilModule.CustomAttrs).AsList()
 
-        let GetAutoOpenAttributes ilg ilModule = 
-            ilModule |> GetCustomAttributesOfIlModule |> List.choose (TryFindAutoOpenAttr ilg)
+        let GetAutoOpenAttributes ilModule =
+            ilModule |> GetCustomAttributesOfILModule |> List.choose TryFindAutoOpenAttr
 
-        let GetInternalsVisibleToAttributes ilg ilModule = 
-            ilModule |> GetCustomAttributesOfIlModule |> List.choose (TryFindInternalsVisibleToAttr ilg)
+        let GetInternalsVisibleToAttributes ilModule =
+            ilModule |> GetCustomAttributesOfILModule |> List.choose TryFindInternalsVisibleToAttr
 
         let HasAnyFSharpSignatureDataAttribute ilModule = 
-            let attrs = GetCustomAttributesOfIlModule ilModule
+            let attrs = GetCustomAttributesOfILModule ilModule
             List.exists IsSignatureDataVersionAttr attrs
 
-        let mkCcuInfo ilg ilScopeRef ilModule ccu : ImportedAssembly =
+        let mkCcuInfo ilScopeRef ilModule ccu : ImportedAssembly =
               { ILScopeRef = ilScopeRef
                 FSharpViewOfMetadata = ccu
-                AssemblyAutoOpenAttributes = GetAutoOpenAttributes ilg ilModule
-                AssemblyInternalsVisibleToAttributes = GetInternalsVisibleToAttributes ilg ilModule
-#if !NO_EXTENSIONTYPING
+                AssemblyAutoOpenAttributes = GetAutoOpenAttributes ilModule
+                AssemblyInternalsVisibleToAttributes = GetInternalsVisibleToAttributes ilModule
+#if !NO_TYPEPROVIDERS
                 IsProviderGenerated = false
                 TypeProviders = []
 #endif
@@ -146,15 +141,16 @@ module TcImports =
                 | ILScopeRef.Local -> failwith "Unsupported reference"
                 | ILScopeRef.Module x -> memoize_mod.Apply x.Name
                 | ILScopeRef.Assembly x -> memoize_mod.Apply x.Name
+                | ILScopeRef.PrimaryAssembly -> failwith "Unsupported reference"
             let ilModule = memoize_mod.Apply ccuName
             let ilShortAssemName = ilModule.ManifestOfAssembly.Name
             let ilScopeRef = ILScopeRef.Assembly (mkSimpleAssemblyRef ilShortAssemName)
             let fileName = ilModule.Name
             let invalidateCcu = new Event<_>()
             let ccu = Import.ImportILAssembly(
-                        tcImports.GetImportMap, m, auxModuleLoader, ilScopeRef,
+                        tcImports.GetImportMap, m, auxModuleLoader, tcConfig.xmlDocInfoLoader, ilScopeRef,
                         tcConfig.implicitIncludeDir, Some fileName, ilModule, invalidateCcu.Publish)
-            let ccuInfo = mkCcuInfo ilGlobals ilScopeRef ilModule ccu
+            let ccuInfo = mkCcuInfo ilScopeRef ilModule ccu
             ccuInfo, None
 
         let GetCcuFS m ccuName =
@@ -167,7 +163,7 @@ module TcImports =
                 match ilModule.Manifest with 
                 | Some manifest -> manifest.ExportedTypes
                 | None -> mkILExportedTypes []
-#if !NO_EXTENSIONTYPING
+#if !NO_TYPEPROVIDERS
             let invalidateCcu = new Event<_>()
 #endif
             let minfo: PickledCcuInfo = sigdata.Value.RawData //TODO: handle missing sigdata
@@ -180,18 +176,19 @@ module TcImports =
                     SourceCodeDirectory = codeDir
                     IsFSharp = true
                     Contents = minfo.mspec
-#if !NO_EXTENSIONTYPING
+#if !NO_TYPEPROVIDERS
                     InvalidateEvent=invalidateCcu.Publish
                     IsProviderGenerated = false
                     ImportProvidedType = (fun ty -> Import.ImportProvidedType (tcImports.GetImportMap()) m ty)
 #endif
                     UsesFSharp20PlusQuotations = minfo.usesQuotations
-                    MemberSignatureEquality = (fun ty1 ty2 -> Tastops.typeEquivAux EraseAll (tcImports.GetTcGlobals()) ty1 ty2)
+                    MemberSignatureEquality = (fun ty1 ty2 -> typeEquivAux EraseAll (tcImports.GetTcGlobals()) ty1 ty2)
                     TryGetILModuleDef = (fun () -> Some ilModule)
                     TypeForwarders = Import.ImportILAssemblyTypeForwarders(tcImports.GetImportMap, m, GetRawTypeForwarders ilModule)
-                    }
+                    XmlDocumentationInfo = None
+                  }
 
-            let optdata = lazy (
+            let optdata = InterruptibleLazy(fun _ ->
                 match memoize_opt.Apply ccuName with 
                 | None -> None
                 | Some data ->
@@ -199,7 +196,7 @@ module TcImports =
                     Some (data.OptionalFixup findCcuInfo) )
 
             let ccu = CcuThunk.Create(ilShortAssemName, ccuData)
-            let ccuInfo = mkCcuInfo ilGlobals ilScopeRef ilModule ccu
+            let ccuInfo = mkCcuInfo ilScopeRef ilModule ccu
             let ccuOptInfo = { ccuInfo with FSharpOptimizationData = optdata }
             ccuOptInfo, sigdata
 
@@ -216,56 +213,85 @@ module TcImports =
                 refCcus
                 |> List.tryFind (fun (x: ImportedAssembly) -> x.FSharpViewOfMetadata.AssemblyName = name)
                 |> Option.map (fun x -> x.FSharpViewOfMetadata)
-            let fixup (data: TastPickle.PickledDataWithReferences<_>) =
+            let fixup (data: PickledDataWithReferences<_>) =
                 data.OptionalFixup findCcuInfo |> ignore
             refCcusUnfixed |> List.choose snd |> List.iter fixup
             refCcus
 
-        let m = range.Zero
+        let m = Range.range0
+        let fsharpCoreAssemblyName = "FSharp.Core"
+        let primaryAssemblyName = PrimaryAssembly.Mscorlib.Name
         let refCcusUnfixed = List.ofArray references |> List.map (GetCcu m)
         let refCcus = fixupCcuInfo refCcusUnfixed
-        let sysCcus = refCcus |> List.filter (fun x -> x.FSharpViewOfMetadata.AssemblyName <> "FSharp.Core")
-        let fslibCcu = refCcus |> List.find (fun x -> x.FSharpViewOfMetadata.AssemblyName = "FSharp.Core")
+        let sysCcuInfos = refCcus |> List.filter (fun x -> x.FSharpViewOfMetadata.AssemblyName <> fsharpCoreAssemblyName)
+        let fslibCcuInfo = refCcus |> List.find (fun x -> x.FSharpViewOfMetadata.AssemblyName = fsharpCoreAssemblyName)
+        let primaryCcuInfo = refCcus |> List.find (fun x -> x.FSharpViewOfMetadata.AssemblyName = primaryAssemblyName)
 
-        let ccuInfos = [fslibCcu] @ sysCcus
+        let ccuInfos = [fslibCcuInfo] @ sysCcuInfos
         let ccuMap = ccuInfos |> List.map (fun ccuInfo -> ccuInfo.FSharpViewOfMetadata.AssemblyName, ccuInfo) |> Map.ofList
 
         // search over all imported CCUs for each cached type
-        let ccuHasType (ccu: CcuThunk) (nsname: string list) (tname: string) =
-            let findEntity (entityOpt: Entity option) n =
+        let ccuHasType (ccu: CcuThunk) (nsname: string list) (tname: string) (publicOnly: bool) =
+            let matchNameSpace (entityOpt: Entity option) n =
                 match entityOpt with
                 | None -> None
                 | Some entity -> entity.ModuleOrNamespaceType.AllEntitiesByCompiledAndLogicalMangledNames.TryFind n
-            let entityOpt = (Some ccu.Contents, nsname) ||> List.fold findEntity
-            match entityOpt with
+
+            match (Some ccu.Contents, nsname) ||> List.fold matchNameSpace with
             | Some ns ->
                 match Map.tryFind tname ns.ModuleOrNamespaceType.TypesByMangledName with
-                | Some _ -> true
+                | Some e ->
+                    if publicOnly then
+                        match e.TypeReprInfo with
+                        | TILObjectRepr data ->
+                            let (TILObjectReprData(_, _, tyDef)) = data
+                            tyDef.Access = ILTypeDefAccess.Public
+                        | _ -> false
+                    else  true
                 | None -> false
             | None -> false
 
         // Search for a type
-        let tryFindSysTypeCcu nsname typeName =
-            let search = sysCcus |> List.tryFind (fun ccuInfo -> ccuHasType ccuInfo.FSharpViewOfMetadata nsname typeName)
+        let tryFindSysTypeCcu path typeName publicOnly =
+            let search = sysCcuInfos |> List.tryFind (fun ccuInfo -> ccuHasType ccuInfo.FSharpViewOfMetadata path typeName publicOnly)
             match search with
             | Some x -> Some x.FSharpViewOfMetadata
             | None ->
 #if DEBUG
-                printfn "Cannot find type %s.%s" (String.concat "." nsname) typeName
+                printfn "Cannot find type %s.%s" (String.concat "." path) typeName
 #endif
                 None
 
-        let tcGlobals = TcGlobals (
-                            tcConfig.compilingFslib, ilGlobals, fslibCcu.FSharpViewOfMetadata,
-                            tcConfig.implicitIncludeDir, tcConfig.mlCompatibility,
-                            tcConfig.isInteractive, tryFindSysTypeCcu,
-                            tcConfig.emitDebugInfoInQuotations, tcConfig.noDebugData, tcConfig.pathMap)
+        let fslibCcu = fslibCcuInfo.FSharpViewOfMetadata
+        let primaryScopeRef = primaryCcuInfo.ILScopeRef
+        let fsharpCoreScopeRef = fslibCcuInfo.ILScopeRef
+        let assembliesThatForwardToPrimaryAssembly = []
+        let ilGlobals = mkILGlobals (primaryScopeRef, assembliesThatForwardToPrimaryAssembly, fsharpCoreScopeRef)
+
+        let tcGlobals =
+            TcGlobals(
+                tcConfig.compilingFSharpCore,
+                ilGlobals,
+                fslibCcu,
+                tcConfig.implicitIncludeDir,
+                tcConfig.mlCompatibility,
+                tcConfig.isInteractive,
+                tcConfig.checkNullness,
+                tcConfig.useReflectionFreeCodeGen,
+                tryFindSysTypeCcu,
+                tcConfig.emitDebugInfoInQuotations,
+                tcConfig.noDebugAttributes,
+                tcConfig.pathMap,
+                tcConfig.langVersion,
+                tcConfig.realsig,
+                tcConfig.compilationMode
+            )
 
 #if DEBUG
         // the global_g reference cell is used only for debug printing
-        do global_g := Some tcGlobals
+        do global_g <- Some tcGlobals
 #endif
         // do this prior to parsing, since parsing IL assembly code may refer to mscorlib
         do tcImports.SetCcuMap(ccuMap)
         do tcImports.SetTcGlobals(tcGlobals)
-        tcImports, tcGlobals
+        tcGlobals, tcImports
