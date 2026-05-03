@@ -89,17 +89,19 @@ module Util =
 
     let (|TransformType|) (com: IDartCompiler) ctx e = com.TransformType(ctx, e)
 
+    [<return: Struct>]
     let (|Function|_|) =
         function
-        | Fable.Lambda(arg, body, _) -> Some([ arg ], body)
-        | Fable.Delegate(args, body, _, []) -> Some(args, body)
-        | _ -> None
+        | Fable.Lambda(arg, body, _) -> ValueSome([ arg ], body)
+        | Fable.Delegate(args, body, _, []) -> ValueSome(args, body)
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|Lets|_|) =
         function
-        | Fable.Let(ident, value, body) -> Some([ ident, value ], body)
-        | Fable.LetRec(bindings, body) -> Some(bindings, body)
-        | _ -> None
+        | Fable.Let(ident, value, body) -> ValueSome([ ident, value ], body)
+        | Fable.LetRec(bindings, body) -> ValueSome(bindings, body)
+        | _ -> ValueNone
 
     let makeTypeRefFromName typeName genArgs =
         let ident = makeImmutableIdent MetaType typeName
@@ -224,6 +226,7 @@ module Util =
         | "Fable.Core.Dart.DartNullable`1", [ genArg ] -> Nullable genArg
         | Types.regexGroup, _ -> Nullable String
         | Types.regexMatch, _ -> makeTypeRefFromName "Match" []
+        | "System.Random", _ -> libTypeRef com ctx "Random" "Random" []
         // We use `dynamic` for Exception because there is no single type that catches all errors in Dart
         // (except when inherited as base class, then it's getExceptionType, see transformInheritedClass)
         | Types.exception_, _ -> Dynamic // getExceptionType com ctx
@@ -2187,6 +2190,10 @@ module Util =
                 )
             ],
             None
+
+        | Fable.Quote _ ->
+            addError com [] None "Quotations are not yet supported for Dart target"
+            [], None
 
     let getLocalFunctionGenericParams
         (_com: IDartCompiler)

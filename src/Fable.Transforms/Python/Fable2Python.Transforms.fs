@@ -2659,6 +2659,9 @@ let rec transformAsExpr (com: IPythonCompiler) ctx (expr: Fable.Expr) : Expressi
         | Fable.Curry(e, arity) -> transformCurry com ctx e arity
         | Fable.Throw _
         | Fable.Debugger -> iife com ctx expr
+    | Fable.Quote(body, _isTyped, _r) ->
+        let emitted = QuotationEmitter.emitQuotedExpr com body
+        transformAsExpr com ctx emitted
 
 let transformAsSlice (com: IPythonCompiler) ctx expr (info: Fable.CallInfo) : Expression * Statement list =
     Expression.withStmts {
@@ -2690,6 +2693,7 @@ let transformAsArray (com: IPythonCompiler) ctx expr (info: Fable.CallInfo) : Ex
 
 /// Active pattern to detect F# `use` statements compiled as TryCatch with Dispose
 /// This helps us to transform F# `use` (i.e. TryCatch) as Python `with` statements
+[<return: Struct>]
 let (|UsePattern|_|) (body: Fable.Expr) =
     match body with
     | Fable.TryCatch(tryBody,
@@ -2704,8 +2708,8 @@ let (|UsePattern|_|) (body: Fable.Expr) =
                                                       _),
                                            _,
                                            _)),
-                     _) -> Some(disposeName, tryBody)
-    | _ -> None
+                     _) -> ValueSome(disposeName, tryBody)
+    | _ -> ValueNone
 
 let rec transformAsStatements (com: IPythonCompiler) ctx returnStrategy (expr: Fable.Expr) : Statement list =
     // printfn "transformAsStatements: %A" expr
@@ -2980,6 +2984,10 @@ let rec transformAsStatements (com: IPythonCompiler) ctx returnStrategy (expr: F
         let target = com.GetIdentifierAsExpr(ctx, var.Name)
 
         [ Statement.for' (target = target, iter = iter, body = body) ]
+
+    | Fable.Quote(body, _isTyped, _r) ->
+        let emitted = QuotationEmitter.emitQuotedExpr com body
+        transformAsStatements com ctx returnStrategy emitted
 
 let transformFunction
     com
@@ -4420,6 +4428,24 @@ let transformInterface (com: IPythonCompiler) ctx (classEnt: Fable.Entity) (_cla
             gr
             |> List.filter (fun memb -> gr.Length = 1 || (memb.IsGetter || memb.IsSetter))
         )
+
+    // [<CLIEvent>] properties are represented in FCS as both an event property getter (e.g.
+    // "Event" with CompiledName "get_Event") and add_/remove_ accessor methods. Object
+    // expressions only implement the add_/remove_ methods, so we must exclude the event
+    // property getter from the Protocol to avoid an unimplementable abstract member.
+    let eventPropertyNames =
+        members
+        |> List.choose (fun m ->
+            if m.CompiledName.StartsWith("add_", System.StringComparison.Ordinal) then
+                Some(m.CompiledName.Substring(4))
+            else
+                None
+        )
+        |> Set.ofList
+
+    let members =
+        members
+        |> List.filter (fun m -> not (eventPropertyNames.Contains(m.DisplayName)))
 
     let classMembers =
         [

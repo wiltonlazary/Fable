@@ -714,7 +714,15 @@ let fold2 (folder: 'State -> 'T1 -> 'T2 -> 'State) (state: 'State) (xs: 'T1 seq)
     acc
 
 let foldBack2 (folder: 'T1 -> 'T2 -> 'State -> 'State) (xs: 'T1 seq) (ys: 'T2 seq) (state: 'State) =
-    Array.foldBack2 folder (toArray xs) (toArray ys) state
+    let xs = toArray xs
+    let ys = toArray ys
+    let len = System.Math.Min(xs.Length, ys.Length)
+    let mutable acc = state
+
+    for i = len - 1 downto 0 do
+        acc <- folder xs[i] ys[i] acc
+
+    acc
 
 let forAll predicate (xs: 'T seq) =
     not (exists (fun x -> not (predicate x)) xs)
@@ -1261,6 +1269,42 @@ let distinctBy<'T, 'Key when 'Key: equality and 'Key: not null> (projection: 'T 
         let hashSet = HashSet<'Key>()
         xs |> filter (fun x -> hashSet.Add(projection x))
     )
+
+let randomShuffleBy (randomizer: unit -> float) (xs: 'T seq) : 'T seq =
+    let arr = toArray xs
+    Array.randomShuffleInPlaceBy randomizer arr
+    ofArray arr
+
+let randomShuffleWith (random: System.Random) (xs: 'T seq) : 'T seq =
+    randomShuffleBy (fun () -> random.NextDouble()) xs
+
+let randomShuffle (xs: 'T seq) : 'T seq = randomShuffleWith (System.Random()) xs
+
+let randomChoiceBy (randomizer: unit -> float) (xs: 'T seq) : 'T =
+    xs |> toArray |> Array.randomChoiceBy randomizer
+
+let randomChoiceWith (random: System.Random) (xs: 'T seq) : 'T =
+    xs |> toArray |> Array.randomChoiceWith random
+
+let randomChoice (xs: 'T seq) : 'T = xs |> toArray |> Array.randomChoice
+
+let randomChoicesBy (randomizer: unit -> float) (count: int) (xs: 'T seq) : 'T seq =
+    xs |> toArray |> Array.randomChoicesBy randomizer count |> ofArray
+
+let randomChoicesWith (random: System.Random) (count: int) (xs: 'T seq) : 'T seq =
+    randomChoicesBy (fun () -> random.NextDouble()) count xs
+
+let randomChoices (count: int) (xs: 'T seq) : 'T seq =
+    randomChoicesWith (System.Random()) count xs
+
+let randomSampleBy (randomizer: unit -> float) (count: int) (xs: 'T seq) : 'T seq =
+    xs |> toArray |> Array.randomSampleBy randomizer count |> ofArray
+
+let randomSampleWith (random: System.Random) (count: int) (xs: 'T seq) : 'T seq =
+    randomSampleBy (fun () -> random.NextDouble()) count xs
+
+let randomSample (count: int) (xs: 'T seq) : 'T seq =
+    randomSampleWith (System.Random()) count xs
 
 let except<'T when 'T: equality> (itemsToExclude: 'T seq) (xs: 'T seq) =
     delay (fun () ->

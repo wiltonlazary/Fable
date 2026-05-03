@@ -29,6 +29,7 @@
     <Compile Include="Misc/Util3.fs" />
     <Compile Include="Util.fs" />
     <Compile Include="ArithmeticTests.fs" />
+    <Compile Include="RandomTests.fs" />
     <Compile Include="ListTests.fs" />
     <Compile Include="UnionTypeTests.fs" />
     <Compile Include="PatternMatchTests.fs" />
@@ -69,6 +70,8 @@
     <Compile Include="TimeSpanTests.fs" />
     <Compile Include="DateTimeTests.fs" />
     <Compile Include="UriTests.fs" />
+    <Compile Include="DateOnlyTests.fs" />
+    <Compile Include="TimeOnlyTests.fs" />
     <Compile Include="DateTimeOffsetTests.fs" />
     <Compile Include="GuidTests.fs" />
     <Compile Include="AnonRecordTests.fs" />
@@ -85,6 +88,7 @@
     <Compile Include="ClassTests.fs" />
     <Compile Include="InterfaceTests.fs" />
     <Compile Include="MiscTests2.fs" />
+    <Compile Include="QuotationTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 </Project>

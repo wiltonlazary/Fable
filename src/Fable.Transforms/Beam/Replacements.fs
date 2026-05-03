@@ -11,12 +11,19 @@ type Context = FSharp2Fable.Context
 type ICompiler = FSharp2Fable.IFableCompiler
 type CallInfo = ReplaceCallInfo
 
+let private physicalEquals r (left: Expr) (right: Expr) =
+    emitExpr r Boolean [ left; right ] "($0 =:= $1)"
+
 // Use fable_comparison:equals/2 for structural equality.
 // This handles ref-wrapped arrays (process dict refs) by dereferencing
 // before comparison, so structural equality works correctly.
 let private equals (com: ICompiler) r equal (left: Expr) (right: Expr) =
     let eqCall =
-        Helper.LibCall(com, "fable_comparison", "equals", Boolean, [ left; right ], ?loc = r)
+        match left.Type with
+        // ResizeArray (System.Collections.Generic.List) uses reference equality in .NET, see #3718.
+        // Two distinct refs are never =:=, so this matches .NET semantics directly.
+        | Array(_, ResizeArray) -> physicalEquals r left right
+        | _ -> Helper.LibCall(com, "fable_comparison", "equals", Boolean, [ left; right ], ?loc = r)
 
     if equal then
         eqCall
@@ -600,9 +607,13 @@ let private objects
     =
     match info.CompiledName, thisArg, args with
     | ".ctor", _, _ -> emitExpr r t [] "ok" |> Some
-    | "ReferenceEquals", None, [ left; right ] -> makeBinOp r Boolean left right BinaryEqual |> Some
-    | "Equals", Some thisObj, [ arg ] -> equals com r true thisObj arg |> Some
-    | "Equals", None, [ left; right ] -> equals com r true left right |> Some
+    | "ReferenceEquals", None, [ left; right ] -> physicalEquals r left right |> Some
+    | "Equals", Some(MaybeCasted arg1), [ MaybeCasted arg2 ]
+    | "Equals", None, [ MaybeCasted arg1; MaybeCasted arg2 ] ->
+        match arg1.Type, arg2.Type with
+        | Array _, _
+        | _, Array _ -> physicalEquals r arg1 arg2 |> Some
+        | _ -> equals com r true arg1 arg2 |> Some
     | "GetHashCode", Some thisObj, [] ->
         Helper.LibCall(com, "fable_comparison", "hash", t, [ thisObj ], ?loc = r)
         |> Some
@@ -995,17 +1006,28 @@ let private strings
         |> Some
     // str.Contains(sub) → fable_string:contains
     | "Contains", Some c, [ sub ] -> Helper.LibCall(com, "fable_string", "contains", t, [ c; sub ]) |> Some
-    // str.IndexOf(sub) / str.IndexOf(sub, startIdx)
-    | "IndexOf", Some c, [ sub ] ->
-        match sub.Type with
-        | Type.Char -> emitExpr r t [ c; sub ] "fable_string:index_of($0, <<($1)/utf8>>)" |> Some
-        | _ -> Helper.LibCall(com, "fable_string", "index_of", t, [ c; sub ]) |> Some
-    | "IndexOf", Some c, [ sub; startIdx ] ->
-        match sub.Type with
-        | Type.Char ->
-            emitExpr r t [ c; sub; startIdx ] "fable_string:index_of($0, <<($1)/utf8>>, $2)"
-            |> Some
-        | _ -> Helper.LibCall(com, "fable_string", "index_of", t, [ c; sub; startIdx ]) |> Some
+    // str.IndexOf(sub) / str.IndexOf(sub, startIdx) — strip any trailing StringComparison arg
+    | "IndexOf", Some c, _ ->
+        let args =
+            args
+            |> List.filter (
+                function
+                | StringComparisonEnumValue -> false
+                | _ -> true
+            )
+
+        match args with
+        | [ sub ] ->
+            match sub.Type with
+            | Type.Char -> emitExpr r t [ c; sub ] "fable_string:index_of($0, <<($1)/utf8>>)" |> Some
+            | _ -> Helper.LibCall(com, "fable_string", "index_of", t, [ c; sub ]) |> Some
+        | [ sub; startIdx ] ->
+            match sub.Type with
+            | Type.Char ->
+                emitExpr r t [ c; sub; startIdx ] "fable_string:index_of($0, <<($1)/utf8>>, $2)"
+                |> Some
+            | _ -> Helper.LibCall(com, "fable_string", "index_of", t, [ c; sub; startIdx ]) |> Some
+        | _ -> None
     // str.IndexOfAny(chars) / str.IndexOfAny(chars, startIdx)
     | "IndexOfAny", Some c, [ chars ] ->
         let chars = derefArr r chars
@@ -1015,19 +1037,30 @@ let private strings
 
         Helper.LibCall(com, "fable_string", "index_of_any", t, [ c; chars; startIdx ])
         |> Some
-    // str.LastIndexOf(sub) / str.LastIndexOf(sub, maxIdx)
-    | "LastIndexOf", Some c, [ sub ] ->
-        match sub.Type with
-        | Type.Char -> emitExpr r t [ c; sub ] "fable_string:last_index_of($0, <<($1)/utf8>>)" |> Some
-        | _ -> Helper.LibCall(com, "fable_string", "last_index_of", t, [ c; sub ]) |> Some
-    | "LastIndexOf", Some c, [ sub; maxIdx ] ->
-        match sub.Type with
-        | Type.Char ->
-            emitExpr r t [ c; sub; maxIdx ] "fable_string:last_index_of($0, <<($1)/utf8>>, $2)"
-            |> Some
-        | _ ->
-            Helper.LibCall(com, "fable_string", "last_index_of", t, [ c; sub; maxIdx ])
-            |> Some
+    // str.LastIndexOf(sub) / str.LastIndexOf(sub, maxIdx) — strip any trailing StringComparison arg
+    | "LastIndexOf", Some c, _ ->
+        let args =
+            args
+            |> List.filter (
+                function
+                | StringComparisonEnumValue -> false
+                | _ -> true
+            )
+
+        match args with
+        | [ sub ] ->
+            match sub.Type with
+            | Type.Char -> emitExpr r t [ c; sub ] "fable_string:last_index_of($0, <<($1)/utf8>>)" |> Some
+            | _ -> Helper.LibCall(com, "fable_string", "last_index_of", t, [ c; sub ]) |> Some
+        | [ sub; maxIdx ] ->
+            match sub.Type with
+            | Type.Char ->
+                emitExpr r t [ c; sub; maxIdx ] "fable_string:last_index_of($0, <<($1)/utf8>>, $2)"
+                |> Some
+            | _ ->
+                Helper.LibCall(com, "fable_string", "last_index_of", t, [ c; sub; maxIdx ])
+                |> Some
+        | _ -> None
     // str.ToCharArray() → binary_to_list(Str), wrap as array ref
     | "ToCharArray", Some c, [] -> emitExpr r t [ c ] "binary_to_list($0)" |> wrapArr com r t |> Some
     | "ToCharArray", Some c, [ start; len ] ->
@@ -1565,6 +1598,35 @@ let private listModule
     | "OfArray", [ arr ] -> derefArr r arr |> Some
     | "OfSeq", [ seq ] -> emitExpr r t [ seq ] "fable_utils:to_list($0)" |> Some
     | "ToSeq", [ list ] -> Some(List.head args)
+    | "RandomShuffleBy", [ randomizer; list ] ->
+        Helper.LibCall(com, "fable_list", "random_shuffle_by", t, [ randomizer; list ])
+        |> Some
+    | "RandomShuffleWith", [ random; list ] ->
+        Helper.LibCall(com, "fable_list", "random_shuffle_with", t, [ random; list ])
+        |> Some
+    | "RandomShuffle", [ list ] -> Helper.LibCall(com, "fable_list", "random_shuffle", t, [ list ]) |> Some
+    | "RandomChoiceBy", [ randomizer; list ] ->
+        Helper.LibCall(com, "fable_list", "random_choice_by", t, [ randomizer; list ])
+        |> Some
+    | "RandomChoiceWith", [ random; list ] ->
+        Helper.LibCall(com, "fable_list", "random_choice_with", t, [ random; list ])
+        |> Some
+    | "RandomChoice", [ list ] -> Helper.LibCall(com, "fable_list", "random_choice", t, [ list ]) |> Some
+    | "RandomChoicesBy", [ randomizer; count; list ] ->
+        Helper.LibCall(com, "fable_list", "random_choices_by", t, [ randomizer; count; list ])
+        |> Some
+    | "RandomChoicesWith", [ random; count; list ] ->
+        Helper.LibCall(com, "fable_list", "random_choices_with", t, [ random; count; list ])
+        |> Some
+    | "RandomChoices", [ count; list ] ->
+        Helper.LibCall(com, "fable_list", "random_choices", t, [ count; list ]) |> Some
+    | "RandomSampleBy", [ randomizer; count; list ] ->
+        Helper.LibCall(com, "fable_list", "random_sample_by", t, [ randomizer; count; list ])
+        |> Some
+    | "RandomSampleWith", [ random; count; list ] ->
+        Helper.LibCall(com, "fable_list", "random_sample_with", t, [ random; count; list ])
+        |> Some
+    | "RandomSample", [ count; list ] -> Helper.LibCall(com, "fable_list", "random_sample", t, [ count; list ]) |> Some
     | _ -> None
 
 /// Beam-specific FSharpList instance method replacements.
@@ -1575,22 +1637,18 @@ let private lists
     (t: Type)
     (info: CallInfo)
     (thisArg: Expr option)
-    (_args: Expr list)
+    (args: Expr list)
     =
-    match info.CompiledName, thisArg with
-    | "get_Head", Some c -> emitExpr r t [ c ] "erlang:hd($0)" |> Some
-    | "get_Tail", Some c -> emitExpr r t [ c ] "erlang:tl($0)" |> Some
-    | "get_Length", Some c -> emitExpr r t [ c ] "erlang:length($0)" |> Some
-    | "get_IsEmpty", Some c -> emitExpr r t [ c ] "($0 =:= [])" |> Some
-    | "get_Empty", _ -> Value(NewList(None, t), None) |> Some
-    | "get_Item", Some c ->
-        match _args with
-        | [ idx ] -> emitExpr r t [ c; idx ] "lists:nth($1 + 1, $0)" |> Some
-        | _ -> None
-    | "GetSlice", Some c ->
-        match _args with
-        | [ lower; upper ] -> Helper.LibCall(com, "fable_list", "get_slice", t, [ lower; upper; c ]) |> Some
-        | _ -> None
+    match info.CompiledName, thisArg, args with
+    | "get_Head", Some c, _ -> emitExpr r t [ c ] "erlang:hd($0)" |> Some
+    | "get_Tail", Some c, _ -> emitExpr r t [ c ] "erlang:tl($0)" |> Some
+    | "get_Length", Some c, _ -> emitExpr r t [ c ] "erlang:length($0)" |> Some
+    | "get_IsEmpty", Some c, _ -> emitExpr r t [ c ] "($0 =:= [])" |> Some
+    | "get_Empty", None, _ -> Value(NewList(None, t), None) |> Some
+    | "Cons", None, [ head; tail ] -> Value(NewList(Some(head, tail), t), None) |> Some
+    | "get_Item", Some c, [ idx ] -> emitExpr r t [ c; idx ] "lists:nth($1 + 1, $0)" |> Some
+    | "GetSlice", Some c, [ lower; upper ] ->
+        Helper.LibCall(com, "fable_list", "get_slice", t, [ lower; upper; c ]) |> Some
     | _ -> None
 
 /// Beam-specific Map module replacements.
@@ -2097,6 +2155,91 @@ let private arrayModule
         let a1 = derefArr r a1
         let a2 = derefArr r a2
         Helper.LibCall(com, "fable_list", "compare_with", t, [ fn; a1; a2 ]) |> Some
+    | "RandomShuffleBy", [ randomizer; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_shuffle_by", t, [ randomizer; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomShuffleWith", [ random; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_shuffle_with", t, [ random; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomShuffle", [ arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_shuffle", t, [ lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomShuffleInPlaceBy", [ randomizer; arr ] ->
+        let lst = derefArr r arr
+
+        let shuffled =
+            Helper.LibCall(com, "fable_list", "random_shuffle_by", Any, [ randomizer; lst ])
+
+        emitExpr r t [ arr; shuffled ] "begin erlang:put($0, $1), ok end" |> Some
+    | "RandomShuffleInPlaceWith", [ random; arr ] ->
+        let lst = derefArr r arr
+
+        let shuffled =
+            Helper.LibCall(com, "fable_list", "random_shuffle_with", Any, [ random; lst ])
+
+        emitExpr r t [ arr; shuffled ] "begin erlang:put($0, $1), ok end" |> Some
+    | "RandomShuffleInPlace", [ arr ] ->
+        let lst = derefArr r arr
+        let shuffled = Helper.LibCall(com, "fable_list", "random_shuffle", Any, [ lst ])
+        emitExpr r t [ arr; shuffled ] "begin erlang:put($0, $1), ok end" |> Some
+    | "RandomChoiceBy", [ randomizer; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_choice_by", t, [ randomizer; lst ])
+        |> Some
+    | "RandomChoiceWith", [ random; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_choice_with", t, [ random; lst ])
+        |> Some
+    | "RandomChoice", [ arr ] ->
+        let lst = derefArr r arr
+        Helper.LibCall(com, "fable_list", "random_choice", t, [ lst ]) |> Some
+    | "RandomChoicesBy", [ randomizer; count; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_choices_by", t, [ randomizer; count; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomChoicesWith", [ random; count; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_choices_with", t, [ random; count; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomChoices", [ count; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_choices", t, [ count; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomSampleBy", [ randomizer; count; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_sample_by", t, [ randomizer; count; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomSampleWith", [ random; count; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_sample_with", t, [ random; count; lst ])
+        |> wrapArr com r t
+        |> Some
+    | "RandomSample", [ count; arr ] ->
+        let lst = derefArr r arr
+
+        Helper.LibCall(com, "fable_list", "random_sample", t, [ count; lst ])
+        |> wrapArr com r t
+        |> Some
     // === Transform ops: deref input(s) AND wrap result ===
     | "Map", [ fn; arr ] ->
         let arr = derefArr r arr
@@ -2651,7 +2794,9 @@ let rec defaultof (_com: ICompiler) (_ctx: Context) (r: SourceLocation option) (
     | Char -> CharConstant '\u0000' |> makeValue None
     | String -> Value(Null typ, r)
     | Builtin BclTimeSpan -> makeIntConst 0
+    | Builtin BclTimeOnly -> makeIntConst 0
     | Builtin BclDateTime -> Value(NewTuple([ makeIntConst 0; makeIntConst 0 ], false), r)
+    | Builtin BclDateOnly -> Helper.LibCall(_com, "fable_date_only", "min_value", typ, [], ?loc = r)
     | Builtin BclDateTimeOffset -> Value(NewTuple([ makeIntConst 0; makeIntConst 0; makeIntConst 0 ], false), r)
     | Builtin BclGuid -> makeStrConst "00000000-0000-0000-0000-000000000000"
     | _ -> Value(Null typ, r)
@@ -3422,6 +3567,9 @@ let private hashSets
     | "ExceptWith", Some callee, [ other ] ->
         Helper.LibCall(com, "fable_hashset", "except_with", t, [ callee; other ], ?loc = r)
         |> Some
+    | "SymmetricExceptWith", Some callee, [ other ] ->
+        Helper.LibCall(com, "fable_hashset", "symmetric_except_with", t, [ callee; other ], ?loc = r)
+        |> Some
     // IsSubsetOf / IsSupersetOf / IsProperSubsetOf / IsProperSupersetOf
     | "IsSubsetOf", Some callee, [ other ] ->
         Helper.LibCall(com, "fable_hashset", "is_subset_of", t, [ callee; other ], ?loc = r)
@@ -3435,10 +3583,25 @@ let private hashSets
     | "IsProperSupersetOf", Some callee, [ other ] ->
         Helper.LibCall(com, "fable_hashset", "is_proper_superset_of", t, [ callee; other ], ?loc = r)
         |> Some
-    // CopyTo
-    | "CopyTo", Some callee, [ arr ] ->
-        Helper.LibCall(com, "fable_hashset", "copy_to", t, [ callee; arr ], ?loc = r)
+    | "Overlaps", Some callee, [ other ] ->
+        Helper.LibCall(com, "fable_hashset", "overlaps", t, [ callee; other ], ?loc = r)
         |> Some
+    | "SetEquals", Some callee, [ other ] ->
+        Helper.LibCall(com, "fable_hashset", "set_equals", t, [ callee; other ], ?loc = r)
+        |> Some
+    // CopyTo
+    | "CopyTo", Some callee, args ->
+        match args with
+        | [ arr ] ->
+            Helper.LibCall(com, "fable_hashset", "copy_to", t, [ callee; arr ], ?loc = r)
+            |> Some
+        | [ arr; targetIndex ] ->
+            Helper.LibCall(com, "fable_hashset", "copy_to", t, [ callee; arr; targetIndex ], ?loc = r)
+            |> Some
+        | [ arr; targetIndex; count ] ->
+            Helper.LibCall(com, "fable_hashset", "copy_to", t, [ callee; arr; targetIndex; count ], ?loc = r)
+            |> Some
+        | _ -> None
     // GetEnumerator
     | "GetEnumerator", Some callee, _ ->
         Helper.LibCall(com, "fable_hashset", "get_enumerator", t, [ callee ], ?loc = r)
@@ -3663,6 +3826,12 @@ let tryField (com: ICompiler) returnTyp ownerTyp fieldName : Expr option =
         | Types.datetime, "MinValue" ->
             Helper.LibCall(com, "fable_date", "min_value", returnTyp, [], ?loc = None)
             |> Some
+        | Types.datetimeOffset, ("MaxValue" | "MinValue" | "UnixEpoch") ->
+            Helper.LibCall(com, "fable_date_offset", Naming.lowerFirst fieldName, returnTyp, [], ?loc = None)
+            |> Some
+        | Types.dateOnly, ("MaxValue" | "MinValue") ->
+            Helper.LibCall(com, "fable_date_only", Naming.lowerFirst fieldName, returnTyp, [], ?loc = None)
+            |> Some
         | _ -> None
     | _ -> None
 
@@ -3855,6 +4024,7 @@ let private guids
             Helper.LibCall(com, "fable_guid", "from_bytes", t, [ arg ], ?loc = r) |> Some
         | _ -> None
     | "NewGuid" -> Helper.LibCall(com, "fable_guid", "new_guid", t, [], ?loc = r) |> Some
+    | "CreateVersion7" -> Helper.LibCall(com, "fable_guid", "create_version7", t, args, ?loc = r) |> Some
     | "Parse" ->
         match args with
         | [ StringConst literalGuid ] ->
@@ -3905,18 +4075,24 @@ let private randoms
         match args with
         | [ seed ] -> Helper.LibCall(com, "fable_random", "new_seeded", t, [ seed ], ?loc = r) |> Some
         | _ -> Helper.LibCall(com, "fable_random", "new", t, [], ?loc = r) |> Some
-    | "Next", Some _ ->
+    | "Next", Some thisArg ->
         match args with
-        | [] -> Helper.LibCall(com, "fable_random", "next", t, [], ?loc = r) |> Some
-        | [ maxVal ] -> Helper.LibCall(com, "fable_random", "next", t, [ maxVal ], ?loc = r) |> Some
+        | [] -> Helper.LibCall(com, "fable_random", "next", t, [ thisArg ], ?loc = r) |> Some
+        | [ maxVal ] ->
+            Helper.LibCall(com, "fable_random", "next", t, [ thisArg; maxVal ], ?loc = r)
+            |> Some
         | [ minVal; maxVal ] ->
-            Helper.LibCall(com, "fable_random", "next", t, [ minVal; maxVal ], ?loc = r)
+            Helper.LibCall(com, "fable_random", "next", t, [ thisArg; minVal; maxVal ], ?loc = r)
             |> Some
         | _ -> None
-    | "NextDouble", Some _ -> Helper.LibCall(com, "fable_random", "next_double", t, [], ?loc = r) |> Some
-    | "NextBytes", Some _ ->
+    | "NextDouble", Some thisArg ->
+        Helper.LibCall(com, "fable_random", "next_double", t, [ thisArg ], ?loc = r)
+        |> Some
+    | "NextBytes", Some thisArg ->
         match args with
-        | [ arr ] -> Helper.LibCall(com, "fable_random", "next_bytes", t, [ arr ], ?loc = r) |> Some
+        | [ arr ] ->
+            Helper.LibCall(com, "fable_random", "next_bytes", t, [ thisArg; arr ], ?loc = r)
+            |> Some
         | _ -> None
     | _ -> None
 
@@ -4147,6 +4323,217 @@ let private dates
         | None -> None
     | _ -> None
 
+/// Beam-specific System.DateOnly replacements.
+/// DateOnly is represented as a DateTime tuple {Ticks, Kind} with time at midnight.
+let private dateOnly
+    (com: ICompiler)
+    (_ctx: Context)
+    r
+    (t: Type)
+    (info: CallInfo)
+    (thisArg: Expr option)
+    (args: Expr list)
+    =
+    match info.CompiledName with
+    | ".ctor" when args.Length = 4 ->
+        "DateOnly constructor with the calendar parameter is not supported."
+        |> addError com _ctx.InlinePath r
+
+        None
+    | ".ctor" -> Helper.LibCall(com, "fable_date_only", "create", t, args, ?loc = r) |> Some
+    | "ToString" ->
+        match thisArg with
+        | Some callee ->
+            match args with
+            | [] ->
+                Helper.LibCall(com, "fable_date_only", "to_string", t, [ callee ], ?loc = r)
+                |> Some
+            | [ fmt ] ->
+                Helper.LibCall(com, "fable_date_only", "to_string", t, [ callee; fmt ], ?loc = r)
+                |> Some
+            | [ fmt; _culture ] ->
+                Helper.LibCall(com, "fable_date_only", "to_string", t, [ callee; fmt ], ?loc = r)
+                |> Some
+            | _ -> None
+        | None -> None
+    | "AddDays"
+    | "AddMonths"
+    | "AddYears" ->
+        match thisArg with
+        | Some callee ->
+            let meth = Naming.removeGetSetPrefix info.CompiledName |> Naming.lowerFirst
+
+            Helper.LibCall(com, "fable_date_only", meth, t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_Year" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_date_only", "year", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "get_Month" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_date_only", "month", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "get_Day" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_date_only", "day", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "get_DayOfWeek" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_only", "day_of_week", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_DayOfYear" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_only", "day_of_year", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_DayNumber" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_only", "day_number", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_MinValue" -> Helper.LibCall(com, "fable_date_only", "min_value", t, [], ?loc = r) |> Some
+    | "get_MaxValue" -> Helper.LibCall(com, "fable_date_only", "max_value", t, [], ?loc = r) |> Some
+    | "FromDayNumber" ->
+        Helper.LibCall(com, "fable_date_only", "from_day_number", t, args, ?loc = r)
+        |> Some
+    | "FromDateTime" ->
+        Helper.LibCall(com, "fable_date_only", "from_date_time", t, args, ?loc = r)
+        |> Some
+    | "ToDateTime" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_only", "to_date_time", t, callee :: args, ?loc = r)
+            |> Some
+        | None -> None
+    | "TryParse" -> Helper.LibCall(com, "fable_date_only", "try_parse", t, args, ?loc = r) |> Some
+    | "Parse" ->
+        let args = args |> List.take 1
+        Helper.LibCall(com, "fable_date_only", "parse", t, args, ?loc = r) |> Some
+    | "Equals" ->
+        match thisArg with
+        | Some callee -> equals com r true callee args.Head |> Some
+        | None -> None
+    | "GetHashCode" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_comparison", "hash", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "CompareTo" ->
+        match thisArg with
+        | Some callee -> compare com r callee args.Head |> Some
+        | None -> None
+    | _ -> None
+
+/// Beam-specific System.TimeOnly replacements.
+/// TimeOnly is represented as ticks since midnight (same unit as TimeSpan).
+let private timeOnly
+    (com: ICompiler)
+    (_ctx: Context)
+    r
+    (t: Type)
+    (info: CallInfo)
+    (thisArg: Expr option)
+    (args: Expr list)
+    =
+    match info.CompiledName with
+    | ".ctor" ->
+        match args with
+        | [ ExprType(Number(Int64, _)) ] ->
+            Helper.LibCall(com, "fable_time_only", "from_ticks", t, args, ?loc = r) |> Some
+        | _ -> Helper.LibCall(com, "fable_time_only", "create", t, args, ?loc = r) |> Some
+    | "get_Hour" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_time_only", "hour", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "get_Minute" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "minute", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_Second" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "second", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_Millisecond" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "millisecond", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_Ticks" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_time_only", "ticks", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "get_MinValue" -> Helper.LibCall(com, "fable_time_only", "min_value", t, [], ?loc = r) |> Some
+    | "get_MaxValue" -> Helper.LibCall(com, "fable_time_only", "max_value", t, [], ?loc = r) |> Some
+    | "ToTimeSpan" -> thisArg
+    | "Add" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "add", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddHours" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "add_hours", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddMinutes" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "add_minutes", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "IsBetween" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_time_only", "is_between", t, callee :: args, ?loc = r)
+            |> Some
+        | None -> None
+    | "ToString" ->
+        match thisArg with
+        | Some callee ->
+            match args with
+            | [] ->
+                Helper.LibCall(com, "fable_time_only", "to_string", t, [ callee ], ?loc = r)
+                |> Some
+            | [ fmt ] ->
+                Helper.LibCall(com, "fable_time_only", "to_string", t, [ callee; fmt ], ?loc = r)
+                |> Some
+            | [ fmt; _culture ] ->
+                Helper.LibCall(com, "fable_time_only", "to_string", t, [ callee; fmt ], ?loc = r)
+                |> Some
+            | _ -> None
+        | None -> None
+    | "TryParse" -> Helper.LibCall(com, "fable_time_only", "try_parse", t, args, ?loc = r) |> Some
+    | "Parse" ->
+        let args = args |> List.take 1
+        Helper.LibCall(com, "fable_time_only", "parse", t, args, ?loc = r) |> Some
+    | "op_Subtraction" ->
+        Helper.LibCall(com, "fable_time_only", "op_subtraction", t, args, ?loc = r)
+        |> Some
+    | "Equals" ->
+        match thisArg with
+        | Some callee -> equals com r true callee args.Head |> Some
+        | None -> None
+    | "GetHashCode" ->
+        match thisArg with
+        | Some callee -> Helper.LibCall(com, "fable_comparison", "hash", t, [ callee ], ?loc = r) |> Some
+        | None -> None
+    | "CompareTo" ->
+        match thisArg with
+        | Some callee -> compare com r callee args.Head |> Some
+        | None -> None
+    | _ -> None
+
 /// Beam-specific System.DateTimeOffset replacements.
 /// DateTimeOffset is represented as a 3-tuple {Ticks, Kind, OffsetTicks}.
 let private dateTimeOffsets
@@ -4165,8 +4552,15 @@ let private dateTimeOffsets
         | ExprType(Number(Int64, _)) :: _ ->
             Helper.LibCall(com, "fable_date_offset", "from_ticks", t, args, ?loc = r)
             |> Some
+        | [ ExprType(DeclaredType(e, [])) ] when e.FullName = Types.datetime ->
+            // DateTimeOffset(DateTime) - single arg, default offset to 0
+            Helper.LibCall(com, "fable_date_offset", "from_date", t, args @ [ makeIntConst 0 ], ?loc = r)
+            |> Some
         | ExprType(DeclaredType(e, [])) :: _ when e.FullName = Types.datetime ->
             Helper.LibCall(com, "fable_date_offset", "from_date", t, args, ?loc = r) |> Some
+        | ExprType(DeclaredType(e, [])) :: _ when e.FullName = Types.dateOnly ->
+            Helper.LibCall(com, "fable_date_offset", "from_date_time", t, args, ?loc = r)
+            |> Some
         | _ -> Helper.LibCall(com, "fable_date_offset", "create", t, args, ?loc = r) |> Some
     | "ToString" ->
         match thisArg with
@@ -4198,13 +4592,13 @@ let private dateTimeOffsets
     | "get_LocalDateTime" ->
         match thisArg with
         | Some callee ->
-            Helper.LibCall(com, "fable_date_offset", "to_local_time", t, [ callee ], ?loc = r)
+            Helper.LibCall(com, "fable_date_offset", "local_date_time", t, [ callee ], ?loc = r)
             |> Some
         | None -> None
     | "get_UtcDateTime" ->
         match thisArg with
         | Some callee ->
-            Helper.LibCall(com, "fable_date_offset", "to_universal_time", t, [ callee ], ?loc = r)
+            Helper.LibCall(com, "fable_date_offset", "utc_date_time", t, [ callee ], ?loc = r)
             |> Some
         | None -> None
     | "get_Year" ->
@@ -4247,24 +4641,185 @@ let private dateTimeOffsets
             Helper.LibCall(com, "fable_date_offset", "millisecond", t, [ callee ], ?loc = r)
             |> Some
         | None -> None
+    | "get_Microsecond" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "microsecond", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
     | "get_Ticks" ->
         match thisArg with
         | Some callee ->
             Helper.LibCall(com, "fable_date_offset", "ticks", t, [ callee ], ?loc = r)
             |> Some
         | None -> None
+    | "get_UtcTicks" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "utc_ticks", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_DayOfWeek" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "day_of_week", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_DayOfYear" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "day_of_year", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_Date" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "date", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_TimeOfDay" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "time_of_day", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "get_TotalOffsetMinutes" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "total_offset_minutes", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
     | "get_Now" -> Helper.LibCall(com, "fable_date_offset", "now", t, [], ?loc = r) |> Some
     | "get_UtcNow" -> Helper.LibCall(com, "fable_date_offset", "utc_now", t, [], ?loc = r) |> Some
     | "get_MinValue" -> Helper.LibCall(com, "fable_date_offset", "min_value", t, [], ?loc = r) |> Some
-    | "TryParse" -> Helper.LibCall(com, "fable_date_offset", "try_parse", t, args, ?loc = r) |> Some
+    | "get_MaxValue" -> Helper.LibCall(com, "fable_date_offset", "max_value", t, [], ?loc = r) |> Some
+    | "get_UnixEpoch" -> Helper.LibCall(com, "fable_date_offset", "unix_epoch", t, [], ?loc = r) |> Some
+    | "ToLocalTime" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "to_local_time", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "ToUniversalTime" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "to_universal_time", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "ToOffset" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "to_offset", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "Add" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "Subtract" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "subtract", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddYears" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_years", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddMonths" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_months", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddDays" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_days", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddHours" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_hours", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddMinutes" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_minutes", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddSeconds" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_seconds", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddMilliseconds" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_milliseconds", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "AddTicks" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "add_ticks", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "op_Addition" ->
+        Helper.LibCall(com, "fable_date_offset", "op_addition", t, args, ?loc = r)
+        |> Some
+    | "op_Subtraction" ->
+        Helper.LibCall(com, "fable_date_offset", "op_subtraction", t, args, ?loc = r)
+        |> Some
+    | "Compare" -> Helper.LibCall(com, "fable_date_offset", "compare", t, args, ?loc = r) |> Some
+    | "CompareTo" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "compare", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
     | "Equals" ->
         match thisArg with
-        | Some callee -> equals com r true callee args.Head |> Some
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "equals", t, [ callee; args.Head ], ?loc = r)
+            |> Some
+        | None -> None
+    | "EqualsExact" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "equals_exact", t, [ callee; args.Head ], ?loc = r)
+            |> Some
         | None -> None
     | "GetHashCode" ->
         match thisArg with
         | Some callee -> Helper.LibCall(com, "fable_comparison", "hash", t, [ callee ], ?loc = r) |> Some
         | None -> None
+    | "FromUnixTimeSeconds" ->
+        Helper.LibCall(com, "fable_date_offset", "from_unix_time_seconds", t, args, ?loc = r)
+        |> Some
+    | "FromUnixTimeMilliseconds" ->
+        Helper.LibCall(com, "fable_date_offset", "from_unix_time_milliseconds", t, args, ?loc = r)
+        |> Some
+    | "ToUnixTimeSeconds" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "to_unix_time_seconds", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "ToUnixTimeMilliseconds" ->
+        match thisArg with
+        | Some callee ->
+            Helper.LibCall(com, "fable_date_offset", "to_unix_time_milliseconds", t, [ callee ], ?loc = r)
+            |> Some
+        | None -> None
+    | "TryParse" -> Helper.LibCall(com, "fable_date_offset", "try_parse", t, args, ?loc = r) |> Some
     | _ -> None
 
 /// Beam-specific System.Uri replacements.
@@ -4908,6 +5463,8 @@ let tryCall
     | Types.datetime -> dates com ctx r t info thisArg args
     | "System.Uri" -> uris com ctx r t info thisArg args
     | Types.datetimeOffset -> dateTimeOffsets com ctx r t info thisArg args
+    | Types.dateOnly -> dateOnly com ctx r t info thisArg args
+    | Types.timeOnly -> timeOnly com ctx r t info thisArg args
     | Types.timespan -> timeSpans com ctx r t info thisArg args
     | "System.Globalization.CultureInfo" ->
         match info.CompiledName with
@@ -5147,7 +5704,8 @@ let tryCall
             | _ -> emitExpr r t [ c ] "maps:get(name, $0)" |> Some
         | _ -> None
     | "System.Text.StringBuilder" -> bclType com ctx r t info thisArg args
-    | _ -> None
+    // F# Quotations
+    | typeName -> Quotations.tryQuotationCall "quotation" com ctx r t info thisArg args typeName
 
 let tryBaseConstructor
     (_com: ICompiler)

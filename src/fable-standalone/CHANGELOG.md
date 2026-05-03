@@ -1,3 +1,11 @@
+---
+last_commit_released: b471dc16fc3b5132af77b5974d1669c9b8220cca
+include:
+  - ../Fable.Transforms/
+  - ../fcs-fable/
+  - ../Fable.AST/
+---
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -5,7 +13,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 2.0.0 - 2026-04-21
+
+* Fable 5.0.0
+
+## 2.0.0-rc.7 - 2026-04-07
+
+* Fable 5.0.0-rc.7
 
 ## 2.0.0-rc.6 - 2026-03-31
 

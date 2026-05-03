@@ -6,6 +6,7 @@ let allTests =
     UtilTests.tests
     Applicative.tests
     Arithmetic.tests
+    RandomTests.tests
     Arrays.tests
     Async.tests
     Chars.tests
@@ -54,6 +55,7 @@ let allTests =
     UnionTypes.tests
     Uri.tests
     ListCollector.tests
+    Quotation.tests
   |]
 
 #if FABLE_COMPILER

@@ -1114,6 +1114,7 @@ module Util =
         | Fable.CurriedApply _
         | Fable.Operation _
         | Fable.Get _
+        | Fable.Quote _
         | Fable.Test _ -> false
 
         | Fable.TypeCast(e, _) -> isJsStatement ctx preferStatement e
@@ -2077,6 +2078,17 @@ module Util =
                     | value -> Some(props, [ value ])
                 else
                     Some((key, value) :: props, children)
+            // When the string value exceeds ~100 chars, Fable wraps it in a Let binding.
+            // The Let body still contains the tuple with the prop key and a reference to the bound var;
+            // we use the bound value (letValue) as the actual prop value.
+            | Some(props, children),
+              MaybeCasted(Fable.Let(_, letValue, MaybeCasted(Fable.Value(Fable.NewTuple([ StringConst key; _ ], _), _)))) ->
+                if key = "children" then
+                    match letValue with
+                    | Replacements.Util.ArrayOrListLiteral(children, _) -> Some(props, children)
+                    | _ -> Some(props, [ letValue ])
+                else
+                    Some((key, letValue) :: props, children)
             | Some _, e ->
                 addError com [] e.Range "Cannot detect JSX prop key at compile time"
 
@@ -3141,6 +3153,10 @@ but thanks to the optimisation done below we get
             | Fable.Throw _
             | Fable.Debugger -> iife com ctx expr
 
+        | Fable.Quote(quotedExpr, _isTyped, _r) ->
+            let emitted = QuotationEmitter.emitQuotedExpr com quotedExpr
+            transformAsExpr com ctx emitted
+
     let rec transformAsStatements (com: IBabelCompiler) ctx returnStrategy (expr: Fable.Expr) : Statement array =
         match expr with
         | Fable.Unresolved(_, _, r) ->
@@ -3307,6 +3323,10 @@ but thanks to the optimisation done below we get
                     ?loc = range
                 )
             |]
+
+        | Fable.Quote(quotedExpr, _isTyped, _r) ->
+            let emitted = QuotationEmitter.emitQuotedExpr com quotedExpr
+            [| transformAsExpr com ctx emitted |> resolveExpr Fable.Any returnStrategy |]
 
     let transformFunction com ctx name (args: Fable.Ident list) (body: Fable.Expr) : Parameter array * BlockStatement =
         let tailcallChance =

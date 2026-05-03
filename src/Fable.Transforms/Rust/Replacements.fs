@@ -480,6 +480,7 @@ let equals (com: ICompiler) ctx r (left: Expr) (right: Expr) =
     | Number _
     | Builtin(FSharpChoice _ | FSharpResult _) -> makeEqOp r left right BinaryEqual
     | Builtin kind -> Helper.LibCall(com, coreModFor kind, "equals", t, [ left; right ], ?loc = r)
+    | Array(_, ResizeArray) -> referenceEquals com ctx r left right
     | Array _ -> Helper.LibCall(com, "Array", "equals", t, [ left; right ], ?loc = r)
     | List _ -> Helper.LibCall(com, "List", "equals", t, [ left; right ], ?loc = r)
     | IEnumerable -> Helper.LibCall(com, "Seq", "equals", t, [ left; right ], ?loc = r)
@@ -495,11 +496,6 @@ let equals (com: ICompiler) ctx r (left: Expr) (right: Expr) =
     | _ ->
         // Helper.LibCall(com, "Native", "equals", t, [left; right], ?loc=r)
         makeEqOp r left right BinaryEqual
-
-let objectEquals (com: ICompiler) ctx r (left: Expr) (right: Expr) =
-    match left.Type with
-    | Array _ -> referenceEquals com ctx r left right
-    | _ -> TypeCast(right, left.Type) |> equals com ctx r left
 
 /// Compare function that will call Util.compare or instance `CompareTo` as appropriate
 let compare (com: ICompiler) ctx r (left: Expr) (right: Expr) =
@@ -1177,8 +1173,12 @@ let objects (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr opt
     | ".ctor", _, _ -> typedObjExpr t [] |> Some
     | "ToString", Some arg, _ -> toString com ctx r [ arg ] |> Some
     | "ReferenceEquals", None, [ arg1; arg2 ] -> referenceEquals com ctx r arg1 arg2 |> Some
-    | "Equals", Some arg1, [ arg2 ]
-    | "Equals", None, [ arg1; arg2 ] -> objectEquals com ctx r arg1 arg2 |> Some
+    | "Equals", Some(MaybeCasted arg1), [ MaybeCasted arg2 ]
+    | "Equals", None, [ MaybeCasted arg1; MaybeCasted arg2 ] ->
+        match arg1.Type, arg2.Type with
+        | Array _, _
+        | _, Array _ -> referenceEquals com ctx r arg1 arg2 |> Some
+        | _ -> TypeCast(arg2, arg1.Type) |> equals com ctx r arg1 |> Some
     | "GetHashCode", Some arg, _ -> objectHash com ctx r arg |> Some
     | "GetType", Some arg, _ ->
         if arg.Type = Any then
@@ -2369,15 +2369,13 @@ let hashSets (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr op
     | "GetEnumerator", Some c ->
         let ar = Helper.LibCall(com, "HashSet", "entries", t, [ c ])
         Helper.LibCall(com, "Seq", "Enumerable::ofArray", t, [ ar ], ?loc = r) |> Some
-    | ("IsProperSubsetOf" | "IsProperSupersetOf" | "UnionWith" | "IntersectWith" | "ExceptWith" | "IsSubsetOf" | "IsSupersetOf" as meth),
-      Some c ->
-        let meth = Naming.lowerFirst meth
-        Helper.LibCall(com, "Set", meth, t, c :: args, ?loc = r) |> Some
-    // TODO!!!
-    // | "CopyTo"
-    // | "SetEquals"
-    // | "Overlaps"
-    // | "SymmetricExceptWith"
+    | "CopyTo", Some c ->
+        let meth = i.CompiledName |> toLowerFirstWithArgsCountSuffix (c :: args)
+        makeLibModuleCall com r t i "HashSet" meth thisArg args |> Some
+    | ("UnionWith" | "IntersectWith" | "ExceptWith" | "SymmetricExceptWith" | "Overlaps" | "SetEquals"), Some _
+    | ("IsProperSubsetOf" | "IsProperSupersetOf" | "IsSubsetOf" | "IsSupersetOf"), Some _ ->
+        let meth = Naming.lowerFirst i.CompiledName
+        makeLibModuleCall com r t i "HashSet" meth thisArg args |> Some
     | meth, _ ->
         let meth = Naming.removeGetSetPrefix meth |> Naming.lowerFirst
         makeLibModuleCall com r t i "HashSet" meth thisArg args |> Some
@@ -2782,27 +2780,22 @@ let globalization
         ObjectExpr([], t, None) |> Some
     | _ -> None
 
-let random (com: ICompiler) (ctx: Context) r t (i: CallInfo) (_: Expr option) (args: Expr list) =
-    match i.CompiledName with
-    | ".ctor" -> ObjectExpr([], t, None) |> Some
-    | "Next" ->
-        let min, max =
-            match args with
-            | [] -> makeIntConst 0, makeIntConst System.Int32.MaxValue
-            | [ max ] -> makeIntConst 0, max
-            | [ min; max ] -> min, max
-            | _ -> FableError "Unexpected arg count for Random.Next" |> raise
+let random (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
+    match i.CompiledName, thisArg with
+    | ".ctor", _ ->
+        match args with
+        | [] -> Helper.LibCall(com, "Random", "new", t, [], [], ?loc = r) |> Some
+        | args ->
+            Helper.LibCall(com, "Random", "new_seeded", t, args, i.SignatureArgTypes, ?loc = r)
+            |> Some
+    | meth, Some thisArg ->
+        let meth =
+            if meth = "Next" then
+                $"next{List.length args}"
+            else
+                meth |> Naming.lowerFirst
 
-        Helper.LibCall(com, "Util", "randomNext", t, [ min; max ], [ min.Type; max.Type ], ?loc = r)
-        |> Some
-    | "NextDouble" -> Helper.GlobalCall("Math", t, [], memb = "random") |> Some
-    | "NextBytes" ->
-        let byteArray =
-            match args with
-            | [ b ] -> b
-            | _ -> FableError "Unexpected arg count for Random.NextBytes" |> raise
-
-        Helper.LibCall(com, "Util", "randomBytes", t, [ byteArray ], [ byteArray.Type ], ?loc = r)
+        Helper.InstanceCall(thisArg, meth, t, args, i.SignatureArgTypes, ?loc = r)
         |> Some
     | _ -> None
 
@@ -3121,6 +3114,10 @@ let guids
         | _ -> None
     // | "Empty", None, [] -> // it's a static field, see tryField
     | "NewGuid", None, [] -> Helper.LibCall(com, "Guid", "new_guid", t, args, ?loc = r) |> Some
+    | "CreateVersion7", None, [] -> Helper.LibCall(com, "Guid", "create_version7", t, [], ?loc = r) |> Some
+    | "CreateVersion7", None, _ ->
+        Helper.LibCall(com, "Guid", "create_version7_with_timestamp", t, args, ?loc = r)
+        |> Some
     | "Parse", None, [ ExprType String ] -> Helper.LibCall(com, "Guid", "parse", t, args, ?loc = r) |> Some
     | "TryParse", None, [ ExprType String; _ ] -> Helper.LibCall(com, "Guid", "tryParse", t, args, ?loc = r) |> Some
     | "ToByteArray", Some x, [] -> Helper.LibCall(com, "Guid", "toByteArray", t, [ x ], ?loc = r) |> Some

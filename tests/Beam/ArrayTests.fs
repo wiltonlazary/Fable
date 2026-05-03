@@ -5,6 +5,128 @@ open Util.Testing
 
 type Animal = Duck of int | Dog of int
 
+[<Fact>]
+let ``test Array expressions works`` () =
+    let a1: int[] = [||]
+    a1 |> equal [||]
+    a1.Length |> equal 0
+    let a2 = [|1; 2; 3|]
+    a2 |> equal [|1; 2; 3|]
+    a2.Length |> equal 3
+
+[<Fact>]
+let ``test Array equality works`` () =
+    let a1 = [|1; 2; 3|]
+    let a2 = [|1; 2; 3|]
+    let a3 = [|1; 2; 4|]
+    let a4 = [|1; 2; 3; 4|]
+    a1 = a1 |> equal true
+    a1 = a2 |> equal true
+    a1 = a3 |> equal false
+    a1 = a4 |> equal false
+    a1 <> a1 |> equal false
+    a1 <> a2 |> equal false
+    a1 <> a3 |> equal true
+    a1 <> a4 |> equal true
+
+[<Fact>]
+let ``test Array.Equals works`` () =
+    let a1 = [|1; 2; 3|]
+    let a2 = [|1; 2; 3|]
+    let a3 = [|1; 2; 4|]
+    let a4 = [|1; 2; 3; 4|]
+    a1.Equals(a1) |> equal true
+    a1.Equals(a2) |> equal false // reference equality
+    a1.Equals(a3) |> equal false
+    a1.Equals(a4) |> equal false
+    (a1 :> obj).Equals(a2 :> obj) |> equal false // reference equality
+
+[<Fact>]
+let ``test Array comparison works`` () =
+    let a1 = [|1; 2; 3|]
+    let a2 = [|1; 2; 3|]
+    let a3 = [|1; 2; 4|]
+    let a4 = [|1; 2; 3; 4|]
+    a1 < a1 |> equal false
+    a1 < a2 |> equal false
+    a1 < a3 |> equal true
+    a1 < a4 |> equal true
+    a3 < a4 |> equal true
+    a3 < a2 |> equal false
+    a4 < a2 |> equal false
+    a4 < a3 |> equal false
+
+[<Fact>]
+let ``test Array compare works`` () =
+    let a1 = [|1; 2; 3|]
+    let a2 = [|1; 2; 3|]
+    let a3 = [|1; 2; 4|]
+    let a4 = [|1; 2; 3; 4|]
+    compare a1 a1 |> equal 0
+    compare a1 a2 |> equal 0
+    compare a1 a3 |> equal -1
+    compare a1 a4 |> equal -1
+    compare a3 a4 |> equal -1
+    compare a3 a2 |> equal 1
+    compare a4 a2 |> equal 1
+    compare a4 a3 |> equal 1
+
+[<Fact>]
+let ``test Array get by index works`` () =
+    let arr = [|1; 2; 3|]
+    arr[0] |> equal 1
+    arr[1] |> equal 2
+    arr[2] |> equal 3
+
+[<Fact>]
+let ``test Array set by index works`` () =
+    let arr = [|1; 2; 3|]
+    arr[1] <- arr[2] + 1
+    arr |> equal [|1; 4; 3|]
+
+[<Fact>]
+let ``test Array pass by reference works`` () =
+    let incElem (arr: int[]) index =
+        arr[index] <- arr[index] + 1
+        arr
+    let incElem2 (arr: int[]) index =
+        arr[index] <- arr[index] + 1
+        arr
+    let arr = [|1; 2; 3|]
+    incElem arr 2 |> equal [|1; 2; 4|]
+    arr |> equal [|1; 2; 4|]
+    let _ = incElem arr 1
+    arr |> equal [|1; 3; 4|]
+    let _ = incElem2 arr 0
+    arr |> equal [|2; 3; 4|]
+
+[<Fact>]
+let ``test Array.empty generic works`` () =
+    let xs = [||]
+    xs.Length |> equal 0
+
+[<Fact>]
+let ``test Array.create with struct tuple works`` () =
+    let xs = Array.create 3 struct (2, "a")
+    xs.Length |> equal 3
+    xs |> equal [|struct (2, "a"); struct (2, "a"); struct (2, "a")|]
+
+[<Fact>]
+let ``test Array.create with object tuple works`` () =
+    let xs = Array.create 3 (2, "a")
+    xs.Length |> equal 3
+    xs |> equal [|(2, "a"); (2, "a"); (2, "a")|]
+
+[<Fact>]
+let ``test Array.zeroCreate with string works`` () =
+    let xs = Array.zeroCreate<string> 3
+    xs.Length |> equal 3
+
+[<Fact>]
+let ``test Array.zeroCreate with struct tuple works`` () =
+    let xs = Array.zeroCreate<struct (int * string)> 3
+    xs.Length |> equal 3
+
 // --- Literals, Indexing, Length ---
 
 [<Fact>]
@@ -722,6 +844,124 @@ let ``test Array.removeManyAt works`` () =
     equal [|3; 4; 5|] (Array.removeManyAt 0 2 [|1..5|])
     equal [|1; 2; 5|] (Array.removeManyAt 2 2 [|1..5|])
     equal [|1; 2; 3|] (Array.removeManyAt 3 2 [|1..5|])
+
+[<Fact>]
+let ``test Array.randomShuffle works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    let shuffled = Array.randomShuffle xs
+    Array.sort shuffled |> equal xs
+    Array.length shuffled |> equal 5
+
+[<Fact>]
+let ``test Array.randomShuffleWith works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    let rng = System.Random(42)
+    let shuffled = Array.randomShuffleWith rng xs
+    Array.sort shuffled |> equal xs
+    Array.length shuffled |> equal 5
+
+[<Fact>]
+let ``test Array.randomShuffleBy works`` () =
+    let shuffled = Array.randomShuffleBy (fun () -> 0.0) [|1; 2; 3; 4; 5|]
+    Array.sort shuffled |> equal [|1; 2; 3; 4; 5|]
+    throwsAnyError (fun () -> Array.randomShuffleBy (fun () -> 1.0) [|1; 2|] |> ignore)
+    throwsAnyError (fun () -> Array.randomShuffleBy (fun () -> -0.1) [|1; 2|] |> ignore)
+
+[<Fact>]
+let ``test Array.randomShuffleInPlace works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    Array.randomShuffleInPlace xs
+    Array.sort xs |> equal [|1; 2; 3; 4; 5|]
+
+[<Fact>]
+let ``test Array.randomShuffleInPlaceWith works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    let rng = System.Random(42)
+    Array.randomShuffleInPlaceWith rng xs
+    Array.sort xs |> equal [|1; 2; 3; 4; 5|]
+
+[<Fact>]
+let ``test Array.randomShuffleInPlaceBy works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    Array.randomShuffleInPlaceBy (fun () -> 0.0) xs
+    Array.sort xs |> equal [|1; 2; 3; 4; 5|]
+    throwsAnyError (fun () -> Array.randomShuffleInPlaceBy (fun () -> 1.0) [|1; 2|])
+    throwsAnyError (fun () -> Array.randomShuffleInPlaceBy (fun () -> -0.1) [|1; 2|])
+
+[<Fact>]
+let ``test Array.randomChoice works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    let x = Array.randomChoice xs
+    Array.contains x xs |> equal true
+    throwsAnyError (fun () -> Array.randomChoice<int> [||] |> ignore)
+
+[<Fact>]
+let ``test Array.randomChoiceWith works`` () =
+    let xs = [|10; 20; 30|]
+    let rng = System.Random(42)
+    let x = Array.randomChoiceWith rng xs
+    Array.contains x xs |> equal true
+
+[<Fact>]
+let ``test Array.randomChoiceBy works`` () =
+    let x = Array.randomChoiceBy (fun () -> 0.0) [|42; 99; 7|]
+    x |> equal 42
+    throwsAnyError (fun () -> Array.randomChoiceBy (fun () -> 1.0) [|1|] |> ignore)
+    throwsAnyError (fun () -> Array.randomChoiceBy (fun () -> 0.5) [||] |> ignore)
+
+[<Fact>]
+let ``test Array.randomChoices works`` () =
+    let xs = [|1; 2; 3|]
+    let choices = Array.randomChoices 5 xs
+    Array.length choices |> equal 5
+    choices |> Array.forall (fun x -> Array.contains x xs) |> equal true
+    Array.randomChoices 0 xs |> equal [||]
+    throwsAnyError (fun () -> Array.randomChoices -1 xs |> ignore)
+    throwsAnyError (fun () -> Array.randomChoices 1 [||] |> ignore)
+
+[<Fact>]
+let ``test Array.randomChoicesWith works`` () =
+    let xs = [|10; 20; 30|]
+    let rng = System.Random(42)
+    let choices = Array.randomChoicesWith rng 4 xs
+    Array.length choices |> equal 4
+    choices |> Array.forall (fun x -> Array.contains x xs) |> equal true
+
+[<Fact>]
+let ``test Array.randomChoicesBy works`` () =
+    let choices = Array.randomChoicesBy (fun () -> 0.5) 3 [|10; 20; 30|]
+    Array.length choices |> equal 3
+    choices |> Array.forall (fun x -> x = 20) |> equal true
+
+[<Fact>]
+let ``test Array.randomSample works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    let sample = Array.randomSample 3 xs
+    Array.length sample |> equal 3
+    sample |> Array.forall (fun x -> Array.contains x xs) |> equal true
+    Array.distinct sample |> Array.length |> equal 3
+    Array.randomSample 0 xs |> equal [||]
+    Array.randomSample 5 xs |> Array.sort |> equal xs
+    throwsAnyError (fun () -> Array.randomSample -1 xs |> ignore)
+    throwsAnyError (fun () -> Array.randomSample 6 xs |> ignore)
+    throwsAnyError (fun () -> Array.randomSample 1 [||] |> ignore)
+
+[<Fact>]
+let ``test Array.randomSampleWith works`` () =
+    let xs = [|1; 2; 3; 4; 5|]
+    let rng = System.Random(42)
+    let sample = Array.randomSampleWith rng 3 xs
+    Array.length sample |> equal 3
+    sample |> Array.forall (fun x -> Array.contains x xs) |> equal true
+    Array.distinct sample |> Array.length |> equal 3
+
+[<Fact>]
+let ``test Array.randomSampleBy works`` () =
+    let sample = Array.randomSampleBy (fun () -> 0.0) 3 [|1; 2; 3; 4; 5|]
+    Array.length sample |> equal 3
+    Array.distinct sample |> Array.length |> equal 3
+    throwsAnyError (fun () -> Array.randomSampleBy (fun () -> 1.0) 1 [|1; 2|] |> ignore)
+    throwsAnyError (fun () -> Array.randomSampleBy (fun () -> -0.1) 1 [|1; 2|] |> ignore)
 
 // --- CompareWith ---
 

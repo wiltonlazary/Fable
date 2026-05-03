@@ -10,6 +10,7 @@ open Fable.AST.Fable
 open Fable.Transforms
 open Replacements.Util
 
+[<return: Struct>]
 let (|DartInt|_|) =
     function
     | Int8
@@ -19,14 +20,15 @@ let (|DartInt|_|) =
     | Int32
     | UInt32
     | Int64
-    | UInt64 -> Some DartInt
-    | _ -> None
+    | UInt64 -> ValueSome DartInt
+    | _ -> ValueNone
 
+[<return: Struct>]
 let (|DartDouble|_|) =
     function
     | Float32
-    | Float64 -> Some DartDouble
-    | _ -> None
+    | Float64 -> ValueSome DartDouble
+    | _ -> ValueNone
 
 let error com msg =
     let e = makeImportLib com Any "ExceptionBase" "Types"
@@ -439,6 +441,7 @@ let rec equals (com: ICompiler) ctx r equal (left: Expr) (right: Expr) =
             makeUnOp None Boolean expr UnaryNot
 
     match left.Type with
+    | Array(_, ResizeArray) -> Helper.GlobalCall("identical", Boolean, [ left; right ], ?loc = r) |> is equal
     | Array(t, _) ->
         match left, right with
         // F# compiler introduces null checks in array pattern matching
@@ -1201,10 +1204,12 @@ let operators (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr o
         let meth = Naming.lowerFirst meth
 
         match meth, t with
-        | ("min" | "max"), Number((DartInt | DartDouble), NumberInfo.Empty) ->
+        | ("min" | "max"), Number(DartInt, NumberInfo.Empty)
+        | ("min" | "max"), Number(DartDouble, NumberInfo.Empty) ->
             Helper.ImportedCall("dart:math", meth, t, args, i.SignatureArgTypes, ?loc = r)
             |> Some
-        | ("minMagnitude" | "maxMagnitude"), Number((DartInt | DartDouble), NumberInfo.Empty) ->
+        | ("minMagnitude" | "maxMagnitude"), Number(DartInt, NumberInfo.Empty)
+        | ("minMagnitude" | "maxMagnitude"), Number(DartDouble, NumberInfo.Empty) ->
             Helper.LibCall(com, "Util", meth, t, args, i.SignatureArgTypes, ?loc = r)
             |> Some
         | _ ->
@@ -1234,8 +1239,12 @@ let objects (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr opt
     | ".ctor", _, _ -> typedObjExpr t [] |> Some
     | "ToString", Some arg, _ -> toString com ctx r [ arg ] |> Some
     | "ReferenceEquals", _, [ left; right ] -> Helper.GlobalCall("identical", t, [ left; right ], ?loc = r) |> Some
-    | "Equals", Some arg1, [ arg2 ]
-    | "Equals", None, [ arg1; arg2 ] -> equals com ctx r true arg1 arg2 |> Some
+    | "Equals", Some(MaybeCasted arg1), [ MaybeCasted arg2 ]
+    | "Equals", None, [ MaybeCasted arg1; MaybeCasted arg2 ] ->
+        match arg1.Type, arg2.Type with
+        | Array _, _
+        | _, Array _ -> Helper.GlobalCall("identical", t, [ arg1; arg2 ], ?loc = r) |> Some
+        | _ -> equals com ctx r true arg1 arg2 |> Some
     | "GetHashCode", Some arg, _ -> identityHash com r arg |> Some
     | "GetType", Some arg, _ -> getImmutableFieldWith r t arg "runtimeType" |> Some
     | _ -> None
@@ -1812,6 +1821,7 @@ let arrayModule (com: ICompiler) (ctx: Context) r (t: Type) (i: CallInfo) (_: Ex
         let t = genArg com ctx r 0 i.GenericArgs
         makeArrayWithRange r t [] |> Some
     | "IsEmpty", [ ar ] -> getFieldWith r t ar "isEmpty" |> Some
+    | "Contains", [ value; ar ] -> Helper.LibCall(com, "Array", "contains", t, [ value; ar ], ?loc = r) |> Some
     | "CopyTo", args -> copyToArray com r t i args
     | ("Distinct" | "DistinctBy" | "Except" | "GroupBy" | "CountBy" as meth), args ->
         let meth = Naming.lowerFirst meth
@@ -2490,11 +2500,13 @@ let hashSets (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr op
     match i.CompiledName, thisArg, args with
     | ".ctor", _, _ ->
         match i.SignatureArgTypes, args with
-        | [], _ -> Helper.GlobalCall("Set", t, [], genArgs = i.GenericArgs, ?loc = r) |> Some
+        | ([] | [ Number _ ]), _ -> Helper.GlobalCall("Set", t, [], genArgs = i.GenericArgs, ?loc = r) |> Some
         | [ IEnumerable ], [ arg ] -> Helper.GlobalCall("Set", t, [ arg ], memb = "of", ?loc = r) |> Some
         | [ IEnumerable; IEqualityComparer ], [ arg; eqComp ] ->
             Helper.LibCall(com, "Types", "setWith", t, [ eqComp; arg ], ?loc = r) |> Some
-        | [ IEqualityComparer ], [ eqComp ] -> Helper.LibCall(com, "Types", "setWith", t, [ eqComp ], ?loc = r) |> Some
+        | [ IEqualityComparer ], [ eqComp ]
+        | [ Number _; IEqualityComparer ], [ _; eqComp ] ->
+            Helper.LibCall(com, "Types", "setWith", t, [ eqComp ], ?loc = r) |> Some
         | _ -> None
     // Const are read-only but I'm not sure how to detect this in runtime
     //    | "get_IsReadOnly", _, _ -> BoolConstant false |> makeValue r |> Some
@@ -2504,14 +2516,71 @@ let hashSets (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr op
         let meth = Naming.removeGetSetPrefix meth |> Naming.lowerFirst
 
         Helper.InstanceCall(c, meth, t, args, i.SignatureArgTypes, ?loc = r) |> Some
-    //    | ("IsProperSubsetOf" | "IsProperSupersetOf" | "IsSubsetOf" | "IsSupersetOf" as meth), Some c, args ->
-    //        let meth = Naming.lowerFirst meth
-    //        let args = injectArg com ctx r "Set" meth i.GenericArgs args
-    //        Helper.LibCall(com, "Set", meth, t, c::args, ?loc=r) |> Some
-    // | "CopyTo" // TODO!!!
-    // | "SetEquals"
-    // | "Overlaps"
-    // | "SymmetricExceptWith"
+    | "UnionWith", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetUnionWith", t, [ c; other ], ?loc = r)
+        |> Some
+    | "IntersectWith", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetIntersectWith", t, [ c; other ], ?loc = r)
+        |> Some
+    | "ExceptWith", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetExceptWith", t, [ c; other ], ?loc = r)
+        |> Some
+    | "IsSubsetOf", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetIsSubsetOf", t, [ c; other ], ?loc = r)
+        |> Some
+    | "IsSupersetOf", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetIsSupersetOf", t, [ c; other ], ?loc = r)
+        |> Some
+    | "IsProperSubsetOf", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetIsProperSubsetOf", t, [ c; other ], ?loc = r)
+        |> Some
+    | "IsProperSupersetOf", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetIsProperSupersetOf", t, [ c; other ], ?loc = r)
+        |> Some
+    | "CopyTo", Some c, args ->
+        let count = getLength c
+
+        match args with
+        | [ target ] ->
+            Helper.LibCall(
+                com,
+                "Types",
+                "hashSetCopyToArray",
+                t,
+                [ c; target; makeIntConst 0; makeIntConst 0; count ],
+                ?loc = r
+            )
+            |> Some
+        | [ target; targetIndex ] ->
+            Helper.LibCall(
+                com,
+                "Types",
+                "hashSetCopyToArray",
+                t,
+                [ c; target; makeIntConst 0; targetIndex; count ],
+                ?loc = r
+            )
+            |> Some
+        | [ target; targetIndex; copyCount ] ->
+            Helper.LibCall(
+                com,
+                "Types",
+                "hashSetCopyToArray",
+                t,
+                [ c; target; makeIntConst 0; targetIndex; copyCount ],
+                ?loc = r
+            )
+            |> Some
+        | _ -> None
+    | "SetEquals", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetSetEquals", t, [ c; other ], ?loc = r)
+        |> Some
+    | "Overlaps", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetOverlaps", t, [ c; other ], ?loc = r)
+        |> Some
+    | "SymmetricExceptWith", Some c, [ other ] ->
+        Helper.LibCall(com, "Types", "hashSetSymmetricExceptWith", t, [ c; other ], ?loc = r)
+        |> Some
     | meth, Some c, args ->
         match meth with
         | "Add" -> Some "add"
@@ -3072,11 +3141,18 @@ let globalization
 let random (com: ICompiler) (ctx: Context) r t (i: CallInfo) (thisArg: Expr option) (args: Expr list) =
     match i.CompiledName, thisArg with
     | ".ctor", _ ->
-        match args with
-        | [] -> Helper.LibCall(com, "Random", "nonSeeded", t, [], [], ?loc = r) |> Some
-        | args ->
-            Helper.LibCall(com, "Random", "seeded", t, args, i.SignatureArgTypes, genArgs = i.GenericArgs, ?loc = r)
-            |> Some
+        Helper.LibCall(
+            com,
+            "Random",
+            "Random",
+            t,
+            args,
+            i.SignatureArgTypes,
+            genArgs = i.GenericArgs,
+            isConstructor = true,
+            ?loc = r
+        )
+        |> Some
     // Not yet supported
     | ("NextInt64" | "NextSingle"), _ -> None
     | meth, Some thisArg ->
@@ -3450,6 +3526,9 @@ let guids
 
     match i.CompiledName with
     | "NewGuid" -> Helper.LibCall(com, "Guid", "newGuid", t, []) |> Some
+    | "CreateVersion7" ->
+        Helper.LibCall(com, "Guid", "createVersion7", t, args, i.SignatureArgTypes)
+        |> Some
     | "Parse" ->
         match args with
         | [ StringConst literalGuid ] -> parseGuid literalGuid
@@ -4050,10 +4129,12 @@ let tryBaseConstructor com ctx (ent: EntityRef) (argTypes: Lazy<Type list>) genA
     | Types.hashset ->
         let args =
             match argTypes.Value, args with
-            | [], _ -> [ makeArray Any []; makeEqualityComparer com ctx (Seq.head genArgs) ]
+            | ([] | [ Number _ ]), _ -> [ makeArray Any []; makeEqualityComparer com ctx (Seq.head genArgs) ]
             | [ IEnumerable ], [ arg ] -> [ arg; makeEqualityComparer com ctx (Seq.head genArgs) ]
             | [ IEnumerable; IEqualityComparer ], [ arg; eqComp ] -> [ arg; makeComparerFromEqualityComparer eqComp ]
-            | [ IEqualityComparer ], [ eqComp ] -> [ makeArray Any []; makeComparerFromEqualityComparer eqComp ]
+            | [ IEqualityComparer ], [ eqComp ]
+            | [ Number _; IEqualityComparer ], [ _; eqComp ] ->
+                [ makeArray Any []; makeComparerFromEqualityComparer eqComp ]
             | _ -> FableError "Unexpected hashset constructor" |> raise
 
         let entityName = FSharp2Fable.Helpers.cleanNameAsJsIdentifier "HashSet"

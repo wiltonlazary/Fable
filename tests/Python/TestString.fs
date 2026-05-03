@@ -262,6 +262,19 @@ let ``test StringBuilder.Append works with various overloads`` () =
     actual |> equal "aaabcd/true5.234xxxx"
 
 [<Fact>]
+let ``test StringBuilder.Append works with numeric type overloads`` () =
+    let sb = System.Text.StringBuilder()
+    sb.Append(1y) |> ignore   // int8
+    sb.Append(2uy) |> ignore  // byte
+    sb.Append(3s) |> ignore   // int16
+    sb.Append(4us) |> ignore  // uint16
+    sb.Append(5u) |> ignore   // uint32
+    sb.Append(6L) |> ignore   // int64
+    sb.Append(7UL) |> ignore  // uint64
+    sb.Append(8.0f) |> ignore // float32
+    sb.ToString() |> equal "12345678"
+
+[<Fact>]
 let ``test StringBuilder.AppendFormat works`` () =
     let sb = System.Text.StringBuilder()
     sb.AppendFormat("Hello{0}World{1}", " ", "!") |> ignore
@@ -488,6 +501,12 @@ let ``test String.Contains works`` () =
     "ABC".Contains("Z") |> equal false
 
 [<Fact>]
+let ``test String.Contains with StringComparison works`` () =
+    "ABC".Contains("b", StringComparison.Ordinal) |> equal false
+    "ABC".Contains("b", StringComparison.OrdinalIgnoreCase) |> equal true
+    "ABC".Contains("b", StringComparison.InvariantCultureIgnoreCase) |> equal true
+
+[<Fact>]
 let ``test String.Split works`` () =
     "a b c  d".Split(' ')
     |> (=) [|"a";"b";"c";"";"d"|] |> equal true
@@ -565,6 +584,31 @@ let ``test String.LastIndexOf works`` () =
 [<Fact>]
 let ``test String.LastIndexOf works with offset`` () =
     "abcdbcebc".LastIndexOf("bc", 3)
+    |> equal 1
+
+[<Fact>]
+let ``test String.IndexOf with StringComparison works`` () =
+    "abcdbc".IndexOf("b", StringComparison.Ordinal)
+    |> equal 1
+
+[<Fact>]
+let ``test String.IndexOf char with StringComparison works`` () =
+    "abcdbc".IndexOf('b', StringComparison.Ordinal)
+    |> equal 1
+
+[<Fact>]
+let ``test String.IndexOf with index and StringComparison works`` () =
+    "abcdbc".IndexOf("b", 3, StringComparison.Ordinal)
+    |> equal 4
+
+[<Fact>]
+let ``test String.LastIndexOf with StringComparison works`` () =
+    "abcdbc".LastIndexOf("b", StringComparison.Ordinal)
+    |> equal 4
+
+[<Fact>]
+let ``test String.LastIndexOf with index and StringComparison works`` () =
+    "abcdbc".LastIndexOf("b", 3, StringComparison.Ordinal)
     |> equal 1
 
 

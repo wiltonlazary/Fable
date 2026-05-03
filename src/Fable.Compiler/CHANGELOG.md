@@ -1,3 +1,19 @@
+---
+last_commit_released: b471dc16fc3b5132af77b5974d1669c9b8220cca
+include:
+  - ../fable-library-beam/
+  - ../fable-library-dart/
+  - ../fable-library-php/
+  - ../fable-library-php/
+  - ../fable-library-py/
+  - ../fable-library-rust/
+  - ../fable-library-ts/
+  - ../Fable.Compiler/
+  - ../Fable.Transforms/
+  - ../Fable.AST/
+  - ../../lib/
+---
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -5,7 +21,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 5.0.0 - 2026-04-21
+
+### Fixed
+
+* [Python] Fix derived classes of generic abstract classes not being instantiable due to mismatched mangled method names between abstract stubs and overrides (by @dbrattli)
+* [Dart/Rust] Fix `ResizeArray` reference equality (by @ncave)
+* [JS/TS/Python/Beam] Fix `ResizeArray` (`System.Collections.Generic.List`) equality to use reference equality instead of structural equality (fixes #3718)
+* [Beam] Fix `List.Cons` call replacement and test (by @ncave)
+* [Beam/Dart/Python/TypeScript] Fix `Array.Equals` to use reference equality instead of structural equality (by @ncave)
+* [Dart/Python/TypeScript/Rust] Fix `Seq.foldBack2` for sequences with different lengths (by @ncave)
+* [All] Fix missing `HashSet` implementations and tests (by @ncave)
+* [Rust] Fix `Array/HashMap/HashSet` internal representation (by @ncave)
+* [Rust] Fix F# classes reference equality semantics (by @ncave)
+* [Python] Fix missing `Array` module implementations and tests (by @ncave)
+* [Python] Fix object expressions implementing interfaces with `[<CLIEvent>]` members no longer produce unimplementable abstract Protocol members (fixes #3039)
+* [Python] Fix `DateTime.TryParse` incorrectly assigning `DateTimeKind.Local` to naive datetime strings (should be `DateTimeKind.Unspecified`) (fixes #3654)
+* [JS/TS] Fix `String.Contains` ignoring `StringComparison` argument (second argument was silently discarded)
+* [Python] Fix `String.Contains` ignoring `StringComparison` argument (second argument was silently discarded)
+* [All] Fix `--noRestore` not skipping MSBuildCracker restores (by @ randrag)
+
+## 5.0.0-rc.13 - 2026-04-07
+
+### Added
+
+* [Python/Beam] Add F# quotation support — construction, pattern matching, and evaluation via `LeafExpressionConverter.EvaluateQuotation` (by @dbrattli)
+* [JS/TS] Add F# quotation support — construction, pattern matching, and evaluation (by @OnurGumus)
+* [All] Add support for `Guid.CreateVersion7()` and `Guid.CreateVersion7(DateTimeOffset)` (by @OnurGumus)
+* [All] Add missing `Array`, `List`, and `Seq` random choice/shuffle/sample members and tests (by @ncave)
+* [Dart/Rust] Add missing `System.Random` implementations and tests (by @ncave)
+* [Beam] Implement missing DateTimeOffset members, add DateOnly and TimeOnly support (by @dbrattli)
+
+### Fixed
+
+* [Python] Remove `python-dateutil` dependency from fable-library; use stdlib `datetime.fromisoformat` with `strptime` fallback
+* [All] Fix unnecessary object allocations during AST traversal when visiting `Import` expressions (by Repo Assist)
+* [Beam] Fix `System.Random.Next(0)` implementation (by @ncave)
+* [Python] Fix `System.Random` seeded implementation  (by @ncave)
+* [Beam] Fix `System.Random` seeded implementation to use per-instance state (by @dbrattli)
+* [Dart] Fix `Array.compareWith` comparing lengths before elements, producing wrong results for arrays with common prefixes (fixes #2961)
+* [Python] Fix unsafe option unwrapping in `DateTimeOffset.get_Offset` and regex replacements (by @dbrattli)
+* [All] Replace unsafe option `.Value` unwrapping with safe alternatives in Python/Replacements.fs and Rust/Fable2Rust.fs (code scanning alerts IONIDE-006)
+* [All] Add `[<return: Struct>]` to partial active patterns in Dart and Rust targets to reduce allocations (code scanning alerts IONIDE-009)
+* [JS/TS] Fix `Guid` to use cryptographically strong random values (by @ncave)
+* [Python] Fix `DateTimeOffset` millisecond constructor and property (by @ncave)
+* [Python] Implement missing `DateTimeOffset` members and fix equality/comparison to use UTC-normalized instants (by @dbrattli)
+* [Python] Add `DateOnly` and `TimeOnly` support (by @dbrattli)
+* [Python] Fix `String.IndexOf`/`LastIndexOf` with `StringComparison` argument emitting it as a start-index instead of a compile error (by @repo-assist)
+* [Beam] Fix `String.IndexOf`/`LastIndexOf` with `StringComparison` argument incorrectly treating the enum value as a start index
+* [JS/TS/Python] Fix `Async.StartChild` with timeout always timing out even when the computation finishes before the deadline (fixes #4481) (by @MangelMaxime)
 
 ## 5.0.0-rc.12 - 2026-03-31
 

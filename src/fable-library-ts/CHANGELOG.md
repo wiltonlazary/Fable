@@ -1,3 +1,13 @@
+---
+last_commit_released: b471dc16fc3b5132af77b5974d1669c9b8220cca
+updaters:
+  - package.json:
+      file: package.json
+  - regex:
+      file: ./../Fable.Transforms/Global/Compiler.fs
+      pattern: (?<=let JS_LIBRARY_VERSION = ").*(?=")
+---
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -5,7 +15,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 2.0.0 - 2026-04-21
+
+### Fixed
+
+* [JS/TS] Fix `ResizeArray` (`System.Collections.Generic.List`) equality to use reference equality instead of structural equality (fixes #3718)
+* [JS/TS] Fix `String.Contains` ignoring `StringComparison` argument (second argument was silently discarded)
+
+## 2.0.0-rc.6 - 2026-04-07
+
+### Fixed
+
+* [JS/TS] Fix `Async.StartChild` with timeout always timing out even when the computation finishes before the deadline (fixes #4481) (by @MangelMaxime)
 
 ## 2.0.0-rc.5 - 2026-03-31
 

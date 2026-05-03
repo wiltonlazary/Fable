@@ -136,6 +136,85 @@ let tests () =
         Array.set x 3 10.
         equal 10. x.[3]
 
+    testCase "Array equality works" <| fun () ->
+        let a1 = [|1; 2; 3|]
+        let a2 = [|1; 2; 3|]
+        let a3 = [|1; 2; 4|]
+        let a4 = [|1; 2; 3; 4|]
+        a1 = a1 |> equal true
+        a1 = a2 |> equal true
+        a1 = a3 |> equal false
+        a1 = a4 |> equal false
+        a1 <> a1 |> equal false
+        a1 <> a2 |> equal false
+        a1 <> a3 |> equal true
+        a1 <> a4 |> equal true
+
+    testCase "Array.Equals works" <| fun () ->
+        let a1 = [|1; 2; 3|]
+        let a2 = [|1; 2; 3|]
+        let a3 = [|1; 2; 4|]
+        let a4 = [|1; 2; 3; 4|]
+        a1.Equals(a1) |> equal true
+        a1.Equals(a2) |> equal false // reference equality
+        a1.Equals(a3) |> equal false
+        a1.Equals(a4) |> equal false
+        (a1 :> obj).Equals(a2 :> obj) |> equal false // reference equality
+
+    testCase "Array comparison works" <| fun () ->
+        let a1 = [|1; 2; 3|]
+        let a2 = [|1; 2; 3|]
+        let a3 = [|1; 2; 4|]
+        let a4 = [|1; 2; 3; 4|]
+        a1 < a1 |> equal false
+        a1 < a2 |> equal false
+        a1 < a3 |> equal true
+        a1 < a4 |> equal true
+        a3 < a4 |> equal true
+        a3 < a2 |> equal false
+        a4 < a2 |> equal false
+        a4 < a3 |> equal false
+
+    testCase "Array compare works" <| fun () ->
+        let a1 = [|1; 2; 3|]
+        let a2 = [|1; 2; 3|]
+        let a3 = [|1; 2; 4|]
+        let a4 = [|1; 2; 3; 4|]
+        compare a1 a1 |> equal 0
+        compare a1 a2 |> equal 0
+        compare a1 a3 |> equal -1
+        compare a1 a4 |> equal -1
+        compare a3 a4 |> equal -1
+        compare a3 a2 |> equal 1
+        compare a4 a2 |> equal 1
+        compare a4 a3 |> equal 1
+
+    testCase "Array get by index works" <| fun () ->
+        let arr = [|1; 2; 3|]
+        arr[0] |> equal 1
+        arr[1] |> equal 2
+        arr[2] |> equal 3
+
+    testCase "Array set by index works" <| fun () ->
+        let arr = [|1; 2; 3|]
+        arr[1] <- arr[2] + 1
+        arr |> equal [|1; 4; 3|]
+
+    testCase "Array pass by reference works" <| fun () ->
+        let incElem (arr: int[]) index =
+            arr[index] <- arr[index] + 1
+            arr
+        let incElem2 (arr: int[]) index =
+            arr[index] <- arr[index] + 1
+            arr
+        let arr = [|1; 2; 3|]
+        incElem arr 2 |> equal [|1; 2; 4|]
+        arr |> equal [|1; 2; 4|]
+        let _ = incElem arr 1
+        arr |> equal [|1; 3; 4|]
+        let _ = incElem2 arr 0
+        arr |> equal [|2; 3; 4|]
+
     testCase "Array.Length works" <| fun () ->
         let xs = [| 1.; 2.; 3.; 4. |]
         xs.Length |> equal 4
@@ -224,6 +303,10 @@ let tests () =
         let xs = Array.empty<int>
         xs.Length |> equal 0
 
+    testCase "Array.empty generic works" <| fun () ->
+        let xs = [||]
+        xs.Length |> equal 0
+
     testCase "Array.append works" <| fun () ->
         let xs1 = [|1; 2; 3; 4|]
         let zs1 = Array.append [|0|] xs1
@@ -264,6 +347,24 @@ let tests () =
         result.[0] + result.[1]
         |> equal 7L
 
+    testCase "Array.create with struct tuple works" <| fun () ->
+        let xs = Array.create 3 struct (2, "a")
+        xs.Length |> equal 3
+        xs |> equal [|struct (2, "a"); struct (2, "a"); struct (2, "a")|]
+
+    testCase "Array.create with object tuple works" <| fun () ->
+        let xs = Array.create 3 (2, "a")
+        xs.Length |> equal 3
+        xs |> equal [|(2, "a"); (2, "a"); (2, "a")|]
+
+    testCase "Array.zeroCreate with string works" <| fun () ->
+        let xs = Array.zeroCreate<string> 3
+        xs.Length |> equal 3
+
+    testCase "Array.zeroCreate with struct tuple works" <| fun () ->
+        let xs = Array.zeroCreate<struct (int * string)> 3
+        xs.Length |> equal 3
+
     testCase "Array.choose must construct array of output type" <| fun () -> // See #1658
         let source = [|1; 3; 5; 7|]
         let target = source |> Array.choose (fun x -> Some { MainThing=x; OtherThing="asd" })
@@ -303,10 +404,20 @@ let tests () =
         Array.exists2 (fun x y -> x * y = 16UL) xs ys
         |> equal true
 
+    testCase "Array.contains works" <| fun () ->
+        let xs = [|1; 2; 3; 4|]
+        xs |> Array.contains 2 |> equal true
+        xs |> Array.contains 0 |> equal false
+
     testCase "Array.filter works" <| fun () ->
         let xs = [|1s; 2s; 3s; 4s|]
         let ys = xs |> Array.filter (fun x -> x > 2s)
         ys.Length |> equal 2
+
+    testCase "Array.where works" <| fun () ->
+        let xs = [|1; 2; 3; 4|]
+        let ys = xs |> Array.where (fun x -> x % 2 = 1)
+        ys |> equal [|1; 3|]
 
 // TODO: Char.IsLetter
     // testCase "Array.filter with chars works" <| fun () ->
@@ -877,11 +988,11 @@ let tests () =
         [|1..8|] |> Array.chunkBySize 4 |> equal [| [|1..4|]; [|5..8|] |]
         [|1..10|] |> Array.chunkBySize 4 |> equal [| [|1..4|]; [|5..8|]; [|9..10|] |]
 
-    // testCase "Array.splitAt works" <| fun () ->
-    //     let ar = [|1;2;3;4|]
-    //     Array.splitAt 0 ar |> equal ([||], [|1;2;3;4|])
-    //     Array.splitAt 3 ar |> equal ([|1;2;3|], [|4|])
-    //     Array.splitAt 4 ar |> equal ([|1;2;3;4|], [||])
+    testCase "Array.splitAt works" <| fun () ->
+        let ar = [|1; 2; 3; 4|]
+        Array.splitAt 0 ar |> equal ([||], [|1; 2; 3; 4|])
+        Array.splitAt 3 ar |> equal ([|1; 2; 3|], [|4|])
+        Array.splitAt 4 ar |> equal ([|1; 2; 3; 4|], [||])
 
     testCase "Arrays are independent from type of the elements" <| fun () ->
         let fromArrayToListAndBack a = a |> Array.toList |> List.toArray
@@ -1102,17 +1213,120 @@ let tests () =
         throwsAnyError (fun () -> Array.removeManyAt -1 2 [|1|] |> ignore)
         throwsAnyError (fun () -> Array.removeManyAt 2 2 [|1|] |> ignore)
 
-    // testCase "Array.compareWith works" <| fun () -> // See #2961
-    //     let a = [|1;3|]
-    //     let b = [|1;2;3|]
-    //     // compares lengths first, then elements
-    //     let c1 = a < b
-    //     let c2 = compare a b
-    //     // should compare elements first, then lengths
-    //     let c3 = Array.compareWith compare a b
-    //     equal c1 true
-    //     equal c2 -1
-    //     equal c3 1
+    testCase "Array.randomShuffle works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        let shuffled = Array.randomShuffle xs
+        Array.sort shuffled |> equal xs
+        Array.length shuffled |> equal 5
+
+    testCase "Array.randomShuffleWith works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        let rng = System.Random(42)
+        let shuffled = Array.randomShuffleWith rng xs
+        Array.sort shuffled |> equal xs
+        Array.length shuffled |> equal 5
+
+    testCase "Array.randomShuffleBy works" <| fun () ->
+        let shuffled = Array.randomShuffleBy (fun () -> 0.0) [|1; 2; 3; 4; 5|]
+        Array.sort shuffled |> equal [|1; 2; 3; 4; 5|]
+        throwsAnyError (fun () -> Array.randomShuffleBy (fun () -> 1.0) [|1; 2|] |> ignore)
+        throwsAnyError (fun () -> Array.randomShuffleBy (fun () -> -0.1) [|1; 2|] |> ignore)
+
+    testCase "Array.randomShuffleInPlace works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        Array.randomShuffleInPlace xs
+        Array.sort xs |> equal [|1; 2; 3; 4; 5|]
+
+    testCase "Array.randomShuffleInPlaceWith works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        let rng = System.Random(42)
+        Array.randomShuffleInPlaceWith rng xs
+        Array.sort xs |> equal [|1; 2; 3; 4; 5|]
+
+    testCase "Array.randomShuffleInPlaceBy works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        Array.randomShuffleInPlaceBy (fun () -> 0.0) xs
+        Array.sort xs |> equal [|1; 2; 3; 4; 5|]
+        throwsAnyError (fun () -> Array.randomShuffleInPlaceBy (fun () -> 1.0) [|1; 2|])
+        throwsAnyError (fun () -> Array.randomShuffleInPlaceBy (fun () -> -0.1) [|1; 2|])
+
+    testCase "Array.randomChoice works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        let x = Array.randomChoice xs
+        Array.exists ((=) x) xs |> equal true
+        throwsAnyError (fun () -> Array.randomChoice<int> [||] |> ignore)
+
+    testCase "Array.randomChoiceWith works" <| fun () ->
+        let xs = [|10; 20; 30|]
+        let rng = System.Random(42)
+        let x = Array.randomChoiceWith rng xs
+        Array.exists ((=) x) xs |> equal true
+
+    testCase "Array.randomChoiceBy works" <| fun () ->
+        let x = Array.randomChoiceBy (fun () -> 0.0) [|42; 99; 7|]
+        x |> equal 42
+        throwsAnyError (fun () -> Array.randomChoiceBy (fun () -> 1.0) [|1|] |> ignore)
+        throwsAnyError (fun () -> Array.randomChoiceBy (fun () -> 0.5) [||] |> ignore)
+
+    testCase "Array.randomChoices works" <| fun () ->
+        let xs = [|1; 2; 3|]
+        let choices = Array.randomChoices 5 xs
+        Array.length choices |> equal 5
+        choices |> Array.forall (fun x -> Array.exists ((=) x) xs) |> equal true
+        Array.randomChoices 0 xs |> equal [||]
+        throwsAnyError (fun () -> Array.randomChoices -1 xs |> ignore)
+        throwsAnyError (fun () -> Array.randomChoices 1 [||] |> ignore)
+
+    testCase "Array.randomChoicesWith works" <| fun () ->
+        let xs = [|10; 20; 30|]
+        let rng = System.Random(42)
+        let choices = Array.randomChoicesWith rng 4 xs
+        Array.length choices |> equal 4
+        choices |> Array.forall (fun x -> Array.exists ((=) x) xs) |> equal true
+
+    testCase "Array.randomChoicesBy works" <| fun () ->
+        let choices = Array.randomChoicesBy (fun () -> 0.5) 3 [|10; 20; 30|]
+        Array.length choices |> equal 3
+        choices |> Array.forall (fun x -> x = 20) |> equal true
+
+    testCase "Array.randomSample works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        let sample = Array.randomSample 3 xs
+        Array.length sample |> equal 3
+        sample |> Array.forall (fun x -> Array.exists ((=) x) xs) |> equal true
+        Array.distinct sample |> Array.length |> equal 3
+        Array.randomSample 0 xs |> equal [||]
+        Array.randomSample 5 xs |> Array.sort |> equal xs
+        throwsAnyError (fun () -> Array.randomSample -1 xs |> ignore)
+        throwsAnyError (fun () -> Array.randomSample 6 xs |> ignore)
+        throwsAnyError (fun () -> Array.randomSample 1 [||] |> ignore)
+
+    testCase "Array.randomSampleWith works" <| fun () ->
+        let xs = [|1; 2; 3; 4; 5|]
+        let rng = System.Random(42)
+        let sample = Array.randomSampleWith rng 3 xs
+        Array.length sample |> equal 3
+        sample |> Array.forall (fun x -> Array.exists ((=) x) xs) |> equal true
+        Array.distinct sample |> Array.length |> equal 3
+
+    testCase "Array.randomSampleBy works" <| fun () ->
+        let sample = Array.randomSampleBy (fun () -> 0.0) 3 [|1; 2; 3; 4; 5|]
+        Array.length sample |> equal 3
+        Array.distinct sample |> Array.length |> equal 3
+        throwsAnyError (fun () -> Array.randomSampleBy (fun () -> 1.0) 1 [|1; 2|] |> ignore)
+        throwsAnyError (fun () -> Array.randomSampleBy (fun () -> -0.1) 1 [|1; 2|] |> ignore)
+
+    testCase "Array.compareWith works" <| fun () -> // See #2961
+        let a = [|1;3|]
+        let b = [|1;2;3|]
+        // compares lengths first, then elements
+        let c1 = a < b
+        let c2 = compare a b
+        // should compare elements first, then lengths
+        let c3 = Array.compareWith compare a b
+        equal c1 true
+        equal c2 -1
+        equal c3 1
 
     // testCase "System.Array.Resize works" <| fun () ->
     //     let mutable xs = [|1; 2; 3; 4; 5|]

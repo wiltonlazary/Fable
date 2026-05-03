@@ -713,28 +713,33 @@ let splitAt (index: int) (array: 'T[]) : 'T[] * 'T[] =
 
     Native.sublist (array, 0, index), Native.sublist (array, index)
 
+// Note that, unlike the `compare` operator, Array.compareWith compares elements first,
+// then falls back to length comparison. See #2961.
 let compareWith (comparer: 'T -> 'T -> int) (array1: 'T[]) (array2: 'T[]) : int =
     // Null checks not necessary because Dart provides null safety
-    //    if isNull array1 then
-    //        if isNull array2 then 0 else -1
-    //    elif isNull array2 then
-    //        1
-    //    else
     let mutable i = 0
     let mutable result = 0
     let length1 = array1.Length
     let length2 = array2.Length
 
-    if length1 > length2 then
+    let minLength =
+        if length1 < length2 then
+            length1
+        else
+            length2
+
+    while i < minLength && result = 0 do
+        result <- comparer array1[i] array2[i]
+        i <- i + 1
+
+    if result <> 0 then
+        result
+    elif length1 > length2 then
         1
     elif length1 < length2 then
         -1
     else
-        while i < length1 && result = 0 do
-            result <- comparer array1[i] array2[i]
-            i <- i + 1
-
-        result
+        0
 
 let equalsWith (equals: 'T -> 'T -> bool) (array1: 'T[]) (array2: 'T[]) : bool =
     // Null checks not necessary because Dart provides null safety
@@ -1125,3 +1130,108 @@ let updateAt (index: int) (y: 'T) (xs: 'T[]) : 'T[] =
             else
                 xs[i]
         )
+
+let randomShuffleInPlaceBy (randomizer: unit -> float) (xs: 'T[]) : unit =
+    let len = xs.Length
+
+    for i = len - 1 downto 1 do
+        let r = randomizer ()
+
+        if r < 0.0 || r >= 1.0 then
+            invalidArg "randomizer" SR.Arg_ArgumentOutOfRangeException
+
+        let j = int (r * float (i + 1))
+        let tmp = xs[i]
+        xs[i] <- xs[j]
+        xs[j] <- tmp
+
+let randomShuffleInPlaceWith (random: System.Random) (xs: 'T[]) : unit =
+    randomShuffleInPlaceBy (fun () -> random.NextDouble()) xs
+
+let randomShuffleInPlace (xs: 'T[]) : unit =
+    randomShuffleInPlaceWith (System.Random()) xs
+
+let randomShuffleBy (randomizer: unit -> float) (xs: 'T[]) : 'T[] =
+    let arr = copy xs
+    randomShuffleInPlaceBy randomizer arr
+    arr
+
+let randomShuffleWith (random: System.Random) (xs: 'T[]) : 'T[] =
+    randomShuffleBy (fun () -> random.NextDouble()) xs
+
+let randomShuffle (xs: 'T[]) : 'T[] = randomShuffleWith (System.Random()) xs
+
+let randomChoiceBy (randomizer: unit -> float) (xs: 'T[]) : 'T =
+    if xs.Length = 0 then
+        invalidArg "source" SR.inputSequenceEmpty
+
+    let len = xs.Length
+    let r = randomizer ()
+
+    if r < 0.0 || r >= 1.0 then
+        invalidArg "randomizer" SR.Arg_ArgumentOutOfRangeException
+
+    xs[int (r * float len)]
+
+let randomChoiceWith (random: System.Random) (xs: 'T[]) : 'T =
+    randomChoiceBy (fun () -> random.NextDouble()) xs
+
+let randomChoice (xs: 'T[]) : 'T = randomChoiceWith (System.Random()) xs
+
+let randomChoicesBy (randomizer: unit -> float) (count: int) (xs: 'T[]) : 'T[] =
+    if count < 0 then
+        invalidArg "count" SR.inputMustBeNonNegative
+
+    if count > 0 && xs.Length = 0 then
+        invalidArg "source" SR.inputSequenceEmpty
+
+    let len = xs.Length
+
+    initialize
+        count
+        (fun _ ->
+            let r = randomizer ()
+
+            if r < 0.0 || r >= 1.0 then
+                invalidArg "randomizer" SR.Arg_ArgumentOutOfRangeException
+
+            xs[int (r * float len)]
+        )
+
+let randomChoicesWith (random: System.Random) (count: int) (xs: 'T[]) : 'T[] =
+    randomChoicesBy (fun () -> random.NextDouble()) count xs
+
+let randomChoices (count: int) (xs: 'T[]) : 'T[] =
+    randomChoicesWith (System.Random()) count xs
+
+let randomSampleBy (randomizer: unit -> float) (count: int) (xs: 'T[]) : 'T[] =
+    if count < 0 then
+        invalidArg "count" SR.inputMustBeNonNegative
+
+    let arr = copy xs
+    let len = arr.Length
+
+    if len = 0 && count > 0 then
+        invalidArg "source" SR.inputSequenceEmpty
+
+    if count > len then
+        invalidArg "count" SR.notEnoughElements
+
+    for i = 0 to count - 1 do
+        let r = randomizer ()
+
+        if r < 0.0 || r >= 1.0 then
+            invalidArg "randomizer" SR.Arg_ArgumentOutOfRangeException
+
+        let j = i + int (r * float (len - i))
+        let tmp = arr[i]
+        arr[i] <- arr[j]
+        arr[j] <- tmp
+
+    getSubArray arr 0 count
+
+let randomSampleWith (random: System.Random) (count: int) (xs: 'T[]) : 'T[] =
+    randomSampleBy (fun () -> random.NextDouble()) count xs
+
+let randomSample (count: int) (xs: 'T[]) : 'T[] =
+    randomSampleWith (System.Random()) count xs

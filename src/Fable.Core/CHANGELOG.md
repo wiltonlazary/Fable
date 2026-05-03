@@ -1,3 +1,7 @@
+---
+last_commit_released: b471dc16fc3b5132af77b5974d1669c9b8220cca
+---
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -5,7 +9,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 5.0.0 - 2026-04-21
+
+* Fable 5 stable
+
+## 5.0.0-rc.2 - 2026-04-07
+
+### Added
+
+* Add `Fable.Core.Quotations` namespace with `QuotExpr` and `QuotVar` types for .NET-side deserialization of Fable quotation ASTs
 
 ## 5.0.0-rc.1 - 2026-02-26
 

@@ -897,6 +897,7 @@ module TypeInfo =
             // most abstract classes are implemented as non-abstract
             makeFullNamePathTy entName genArgsOpt
 
+    [<return: Struct>]
     let (|HasEmitAttribute|_|) (ent: Fable.Entity) =
         ent.Attributes
         |> Seq.tryPick (fun att ->
@@ -907,6 +908,7 @@ module TypeInfo =
             else
                 None
         )
+        |> Option.toValueOption
 
     type PointerType =
         | Lrc
@@ -914,6 +916,7 @@ module TypeInfo =
         | Arc
         | Box
 
+    [<return: Struct>]
     let (|HasReferenceTypeAttribute|_|) (ent: Fable.Entity) =
         ent.Attributes
         |> Seq.tryPick (fun att ->
@@ -930,17 +933,19 @@ module TypeInfo =
             else
                 None
         )
+        |> Option.toValueOption
 
+    [<return: Struct>]
     let (|IsNonErasedInterface|_|) (com: Compiler) =
         function
         | Fable.DeclaredType(entRef, genArgs) ->
             let ent = com.GetEntity(entRef)
 
             if ent.IsInterface && not (ent |> FSharp2Fable.Util.hasAttribute Atts.erase) then
-                Some(entRef, genArgs)
+                ValueSome(entRef, genArgs)
             else
-                None
-        | _ -> None
+                ValueNone
+        | _ -> ValueNone
 
     let transformEntityType (com: IRustCompiler) ctx (entRef: Fable.EntityRef) genArgs : Rust.Ty =
         match com.GetEntity(entRef) with
@@ -949,6 +954,10 @@ module TypeInfo =
             mkEmitTy value genArgs
         | ent when ent.IsInterface -> transformInterfaceType com ctx entRef genArgs
         | ent when ent.IsAbstractClass -> transformAbstractClassType com ctx entRef genArgs
+        | _ when entRef.FullName = "System.Random" ->
+            let entName = getLibraryImportName com ctx "Random" "Random"
+            let genArgsOpt = transformGenArgs com ctx genArgs
+            makeFullNamePathTy entName genArgsOpt
         | ent ->
             let entName = getEntityFullName com ctx entRef
             let genArgsOpt = transformGenArgs com ctx genArgs
@@ -1095,6 +1104,9 @@ module TypeInfo =
             | Replacements.Util.IsEntity (Types.taskBuilderModule) (_, []) -> transformTaskBuilderType com ctx
             | Replacements.Util.IsEntity (Types.thread) (_, []) -> transformThreadType com ctx
 
+            // implemented random type
+            | Replacements.Util.IsEntity (Types.random) (_, []) -> transformImportType com ctx [] "Random" "Random"
+
             // implemented regex types
             | Replacements.Util.IsEntity (Types.regexMatch) (_, []) -> transformImportType com ctx [] "RegExp" "Match"
             | Replacements.Util.IsEntity (Types.regexGroup) (_, []) -> transformImportType com ctx [] "RegExp" "Group"
@@ -1176,43 +1188,50 @@ module Util =
 
     let (|TransformExpr|) (com: IRustCompiler) ctx e = com.TransformExpr(ctx, e)
 
+    [<return: Struct>]
     let (|Function|_|) =
         function
-        | Fable.Lambda(arg, body, info) -> Some([ arg ], body, info)
-        | Fable.Delegate(args, body, info, []) -> Some(args, body, info)
-        | _ -> None
+        | Fable.Lambda(arg, body, info) -> ValueSome([ arg ], body, info)
+        | Fable.Delegate(args, body, info, []) -> ValueSome(args, body, info)
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|Lets|_|) =
         function
-        | Fable.Let(ident, value, body) -> Some([ ident, value ], body)
-        | Fable.LetRec(bindings, body) -> Some(bindings, body)
-        | _ -> None
+        | Fable.Let(ident, value, body) -> ValueSome([ ident, value ], body)
+        | Fable.LetRec(bindings, body) -> ValueSome(bindings, body)
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|IDisposable|_|) =
         function
-        | Replacements.Util.IsEntity (Types.idisposable) _ -> Some()
-        | _ -> None
+        | Replacements.Util.IsEntity (Types.idisposable) _ -> ValueSome()
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|IFormattable|_|) =
         function
-        | Replacements.Util.IsEntity (Types.iformattable) _ -> Some()
-        | _ -> None
+        | Replacements.Util.IsEntity (Types.iformattable) _ -> ValueSome()
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|IComparable|_|) =
         function
-        | Replacements.Util.IsEntity (Types.icomparableGeneric) (_, [ genArg ]) -> Some(genArg)
-        | _ -> None
+        | Replacements.Util.IsEntity (Types.icomparableGeneric) (_, [ genArg ]) -> ValueSome(genArg)
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|IEquatable|_|) =
         function
-        | Replacements.Util.IsEntity (Types.iequatableGeneric) (_, [ genArg ]) -> Some(genArg)
-        | _ -> None
+        | Replacements.Util.IsEntity (Types.iequatableGeneric) (_, [ genArg ]) -> ValueSome(genArg)
+        | _ -> ValueNone
 
+    [<return: Struct>]
     let (|IEnumerable|_|) =
         function
-        | Replacements.Util.IsEntity (Types.ienumerableGeneric) (_, [ genArg ]) -> Some(genArg)
-        | Replacements.Util.IsEntity (Types.ienumerable) _ -> Some(Fable.Any)
-        | _ -> None
+        | Replacements.Util.IsEntity (Types.ienumerableGeneric) (_, [ genArg ]) -> ValueSome(genArg)
+        | Replacements.Util.IsEntity (Types.ienumerable) _ -> ValueSome(Fable.Any)
+        | _ -> ValueNone
 
     let isUnitArg (ident: Fable.Ident) =
         ident.IsCompilerGenerated
@@ -3513,6 +3532,10 @@ module Util =
 
                 mkUnitExpr ()
 
+        | Fable.Quote _ ->
+            addError com [] None "Quotations are not yet supported for Rust target"
+            mkUnitExpr ()
+
     let rec tryFindEntryPoint (com: IRustCompiler) decl : string list option =
         match decl with
         | Fable.ModuleDeclaration decl ->
@@ -3779,10 +3802,9 @@ module Util =
     let getFunctionBodyCtx com ctx (name: string option) (args: Fable.Ident list) (body: Fable.Expr) isTailRec =
 
         let tco =
-            if isTailRec then
-                Some(NamedTailCallOpportunity(com, ctx, name.Value, args) :> ITailCallOpportunity)
-            else
-                None
+            match isTailRec, name with
+            | true, Some n -> Some(NamedTailCallOpportunity(com, ctx, n, args) :> ITailCallOpportunity)
+            | _ -> None
 
         let usages = calcIdentUsages args [ body ]
 
@@ -3867,17 +3889,17 @@ module Util =
         let fnBody = transformFunctionBody com ctx args body
 
         let fnBody =
-            if isRecursive && not isTailRec then
+            match isRecursive && not isTailRec, name with
+            | true, Some n ->
                 // make the closure recursive with fixed-point combinator
-                let fixedArgs = (makeIdent name.Value) :: args
+                let fixedArgs = (makeIdent n) :: args
                 let fixedDecl = transformFunctionDecl com ctx fixedArgs [] Fable.Unit
                 let fixedBody = mkClosureExpr true fixedDecl fnBody
                 let argExprs = args |> List.map Fable.IdentExpr
                 let callArgs = transformCallArgs com ctx argExprs [] []
                 let fixCallArgs = (fixedBody |> mkAddrOfExpr) :: callArgs
                 makeLibCall com ctx None "Native" ("fix" + argCount) fixCallArgs
-            else
-                fnBody
+            | _ -> fnBody
 
         let cloneStmts =
             // clone captured idents (in 'move' closures)
@@ -4778,6 +4800,67 @@ module Util =
         else
             [ makeItem "Display" ]
 
+    let makeRefEqualityTraitImpls com ctx entName genArgs =
+        // For F# class types without structural equality, use pointer-based
+        // PartialEq, Eq, and Hash so they can be used as HashSet/HashMap keys
+        // with reference (pointer) equality semantics, matching .NET behavior.
+        // expected output:
+        // impl PartialEq for {self_ty} {
+        //     fn eq(&self, other: &Self) -> bool { core::ptr::eq(self, other) }
+        // }
+        // impl Eq for {self_ty} {}
+        // impl core::hash::Hash for {self_ty} {
+        //     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        //         core::hash::Hash::hash(&(self as *const Self as usize), state)
+        //     }
+        // }
+
+        let eqFnItem =
+            let bodyStmt = "core::ptr::eq(self, other)" |> mkEmitExprStmt
+            let fnBody = [ bodyStmt ] |> mkBlock |> Some
+
+            let fnDecl =
+                let selfTy = mkImplSelfTy () |> mkRefTy None
+
+                let inputs =
+                    [ mkImplSelfParam false false; mkTypedParam "other" selfTy false false ]
+
+                let output = mkGenericPathTy [ "bool" ] None |> mkFnRetTy
+                mkFnDecl inputs output
+
+            let fnKind = mkFnKind DEFAULT_FN_HEADER fnDecl NO_GENERICS fnBody
+            mkFnAssocItem [] "eq" fnKind
+
+        let makeImpl traitPath assocItems =
+            let path = mkGenericPath traitPath None None
+            let ofTrait = mkTraitRef path |> Some
+            assocItems |> makeTraitImpl com ctx entName genArgs ofTrait
+
+        let hashFnItem =
+            let bodyStmt =
+                "core::hash::Hash::hash(&(self as *const Self as usize), state)"
+                |> mkEmitExprStmt
+
+            let fnBody = [ bodyStmt ] |> mkBlock |> Some
+            let hasherBound = mkTypeTraitGenericBound ("core" :: "hash" :: "Hasher" :: []) None
+            let hParam = mkGenericParamFromName [] "H" [ hasherBound ]
+            let hTy = mkGenericPathTy [ "H" ] None |> mkMutRefTy None
+
+            let fnDecl =
+                let inputs = [ mkImplSelfParam false false; mkTypedParam "state" hTy false false ]
+                let output = mkUnitTy () |> mkFnRetTy
+                mkFnDecl inputs output
+
+            let generics = [ hParam ] |> mkGenerics
+            let fnKind = mkFnKind DEFAULT_FN_HEADER fnDecl generics fnBody
+            mkFnAssocItem [] "hash" fnKind
+
+        [
+            makeImpl ("core" :: "cmp" :: rawIdent "PartialEq" :: []) [ eqFnItem ]
+            makeImpl ("core" :: "cmp" :: rawIdent "Eq" :: []) []
+            makeImpl ("core" :: "hash" :: "Hash" :: []) [ hashFnItem ]
+        ]
+
     let op_impl_map =
         Map
             [
@@ -4980,6 +5063,25 @@ module Util =
         let operatorTraitImpls =
             nonInterfaceMembers |> makeOpTraitImpls com ctx ent entName genArgs
 
+        let refEqualityTraitImpls =
+            // Generate pointer-based PartialEq/Eq/Hash for class types without
+            // structural equality, matching .NET reference equality semantics.
+            let isClass =
+                not ent.IsFSharpUnion
+                && not ent.IsValueType
+                && not ent.IsFSharpExceptionDeclaration
+                && not isObjectExpr
+
+            let needsRefEquality =
+                isClass
+                && not (isEquatableEntity com Set.empty ent)
+                && not (isHashableEntity com Set.empty ent)
+
+            if needsRefEquality then
+                makeRefEqualityTraitImpls com ctx entName genParams
+            else
+                []
+
         let interfaceTraitImpls =
             interfaceMembers
             |> List.choose (fun (d, m) -> m.DeclaringEntity)
@@ -5014,6 +5116,7 @@ module Util =
         @ nonInterfaceImpls
         @ displayTraitImpls
         @ operatorTraitImpls
+        @ refEqualityTraitImpls
         @ interfaceTraitImpls
 
     let transformClassDecl (com: IRustCompiler) ctx (decl: Fable.ClassDecl) =
